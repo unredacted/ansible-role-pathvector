@@ -1,0 +1,44 @@
+---
+# tasks file for ansible-role-pathvector
+
+- name: Download Pathvector's signing key
+  ansible.builtin.get_url:
+    url: https://repo.pathvector.io/pgp.asc
+    dest: /usr/share/keyrings/pathvector.asc
+    mode: '0644'
+
+- name: Add the Pathvector APT repository
+  apt_repository:
+    repo: "{{ pathvector_repo }}"
+    state: present
+
+- name: Install Bird2 and Pathvector
+  apt:
+    name:
+    - bird2
+    - pathvector
+    state: present
+    update_cache: yes
+
+- name: Start and enable the Bird service
+  systemd:
+    name: bird
+    state: started
+    enabled: yes
+
+- name: Check if Pathvector configuration file exists for the host
+  stat:
+    path: "{{ playbook_dir }}/files/{{ inventory_hostname }}.yml"
+  delegate_to: localhost
+  register: pathvector_config_file
+
+- name: Copy Pathvector configuration file
+  copy:
+    src: "{{ playbook_dir }}/files/{{ inventory_hostname }}.yml"
+    dest: "{{ pathvector_config_path }}"
+    backup: yes
+  when: pathvector_config_file.stat.exists
+
+- name: Generate Pathvector configuration
+  command: pathvector generate
+  when: pathvector_config_file.stat.exists
