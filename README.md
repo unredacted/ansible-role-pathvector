@@ -1,7 +1,7 @@
 ansible-role-pathvector
 =========
 
-An Ansible role to install and configure [Pathvector](https://pathvector.io/) & Bird on Debian.
+An Ansible role to install and configure [Pathvector](https://pathvector.io/) & Bird.
 
 Requirements
 ------------
@@ -74,7 +74,7 @@ Example Playbook
 License
 -------
 
-GNU General Public License Version 3
+GPL-3
 
 Author Information
 ------------------
