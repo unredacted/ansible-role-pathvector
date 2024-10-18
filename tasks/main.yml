@@ -15,8 +15,8 @@
 - name: Install Bird2 and Pathvector
   apt:
     name:
-    - bird2
-    - pathvector
+      - bird2
+      - pathvector
     state: present
     update_cache: yes
 
@@ -26,19 +26,76 @@
     state: started
     enabled: yes
 
-- name: Check if Pathvector configuration file exists for the host
-  stat:
-    path: "{{ playbook_dir }}/files/{{ inventory_hostname }}.yml"
+- name: Debug playbook directory
+  debug:
+    msg: "Playbook directory: {{ playbook_dir }}"
+    verbosity: 0
+
+- name: List contents of files directory
+  command: "ls -R {{ playbook_dir }}/files"
   delegate_to: localhost
-  register: pathvector_config_file
+  register: files_contents
+  changed_when: false
+
+- name: Debug files directory contents
+  debug:
+    var: files_contents.stdout_lines
+    verbosity: 0
+
+- name: Find Pathvector configuration file for the host (expanded search)
+  find:
+    paths: "{{ playbook_dir }}/files"
+    patterns: 
+      - "*/{{ inventory_hostname }}.yml"
+      - "{{ inventory_hostname }}.yml"
+    recurse: yes
+  delegate_to: localhost
+  register: pathvector_config_files
+
+- name: Debug found files (always show)
+  debug:
+    var: pathvector_config_files
+    verbosity: 0
+
+- name: Set fact for configuration file status
+  set_fact:
+    config_file_found: "{{ pathvector_config_files.matched > 0 }}"
+
+- name: Set fact for found configuration file
+  set_fact:
+    pathvector_config_file: "{{ pathvector_config_files.files[0].path if pathvector_config_files.matched > 0 else '' }}"
+
+- name: Debug configuration file status (always show)
+  debug:
+    msg: 
+      - "Config file found: {{ config_file_found }}"
+      - "Config file path: {{ pathvector_config_file }}"
+      - "Number of files matched: {{ pathvector_config_files.matched }}"
+    verbosity: 0
 
 - name: Copy Pathvector configuration file
   copy:
-    src: "{{ playbook_dir }}/files/{{ inventory_hostname }}.yml"
+    src: "{{ pathvector_config_file }}"
     dest: "{{ pathvector_config_path }}"
     backup: yes
-  when: pathvector_config_file.stat.exists
+  when: config_file_found | bool
+  register: copy_result
+
+- name: Debug copy result
+  debug:
+    var: copy_result
+    verbosity: 0
+
+- name: Display warning if no configuration file found
+  debug:
+    msg: "Warning: No configuration file found for {{ inventory_hostname }}"
+  when: not config_file_found | bool
 
 - name: Generate Pathvector configuration
   command: pathvector generate
-  when: pathvector_config_file.stat.exists
+  register: generate_result
+
+- name: Debug generate result
+  debug:
+    var: generate_result
+    verbosity: 0

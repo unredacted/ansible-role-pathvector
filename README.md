@@ -23,7 +23,7 @@ vars:
     pathvector_config_path: "/etc/pathvector.yml"
 ```
 
-Example file (where router1 is the host): `files/router1.yml`
+Example file (where router1 is the host): `files/upstream_name/router1.yml`
 
 ```
 asn: AS_NUMBER_HERE
