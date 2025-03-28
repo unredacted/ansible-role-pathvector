@@ -23,6 +23,7 @@ vars:
     pathvector_config_path: "/etc/pathvector.yml"
     pathvector_debug: false
     pathvector_run_script: false
+    pathvector_script_flags: "--prepends 2,1,0 --ignore router1.yml,router2.yml"
     pathvector_deploy_only: false
 ```
 
@@ -84,6 +85,7 @@ Example Playbook
     pathvector_config_path: "/etc/pathvector.yml"
     pathvector_debug: false
     pathvector_run_script: false
+    pathvector_script_flags: "--prepends 2,1,0 --ignore router1.yml,router2.yml"
     pathvector_deploy_only: false
 ```
 

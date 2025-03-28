@@ -5,4 +5,5 @@ pathvector_repo: "deb [signed-by=/usr/share/keyrings/pathvector.asc] https://rep
 pathvector_config_path: "/etc/pathvector.yml"
 pathvector_debug: false
 pathvector_run_script: false
+pathvector_script_flags: ""
 pathvector_deploy_only: false

@@ -100,7 +100,11 @@ def get_upstream_tiers_by_asn(asn):
 def calculate_prepends(tier, custom_prepends):
     return custom_prepends.get(tier, 0)
 
-def update_yaml(file_path, mode="ipv4", custom_prepends=DEFAULT_PREPENDS):
+def update_yaml(file_path, mode="ipv4", custom_prepends=DEFAULT_PREPENDS, ignore_files=[]):
+    if os.path.basename(file_path) in ignore_files:
+        print(f"Skipping ignored file: {file_path}")
+        return
+
     yaml = YAML()
     yaml.preserve_quotes = True
     yaml.indent(mapping=2, sequence=4, offset=2)
@@ -168,13 +172,17 @@ def parse_prepends_arg(arg):
         print("Invalid --prepends format. Use: --prepends 2,1,0")
         sys.exit(1)
 
+def parse_ignore_arg(arg):
+    return [x.strip() for x in arg.split(",") if x.strip()]
+
 def main():
     if len(sys.argv) < 2:
-        print("Usage: ./update_prepends.py <files_directory> [--ipv4|--ipv6] [--prepends 2,1,0]")
+        print("Usage: ./update_prepends.py <files_directory> [--ipv4|--ipv6] [--prepends 2,1,0] [--ignore config1.yml,config2.yml]")
         sys.exit(1)
 
     mode = "ipv4"
     custom_prepends = DEFAULT_PREPENDS
+    ignore_files = []
 
     if "--ipv6" in sys.argv:
         mode = "ipv6"
@@ -184,6 +192,13 @@ def main():
             custom_prepends = parse_prepends_arg(sys.argv[idx])
         except (IndexError, ValueError):
             print("Error: --prepends flag requires a value like 2,1,0")
+            sys.exit(1)
+    if "--ignore" in sys.argv:
+        try:
+            idx = sys.argv.index("--ignore") + 1
+            ignore_files = parse_ignore_arg(sys.argv[idx])
+        except IndexError:
+            print("Error: --ignore flag requires a comma-separated list of filenames")
             sys.exit(1)
 
     print("Tier 1 ASNs and Networks included in this script:")
@@ -196,7 +211,7 @@ def main():
         for filename in files:
             if filename.endswith('.yml') or filename.endswith('.yaml'):
                 file_path = os.path.join(root, filename)
-                update_yaml(file_path, mode, custom_prepends)
+                update_yaml(file_path, mode, custom_prepends, ignore_files)
 
 if __name__ == "__main__":
     main()
