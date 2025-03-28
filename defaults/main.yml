@@ -1,2 +1,8 @@
 ---
 # defaults file for ansible-role-pathvector
+
+pathvector_repo: "deb [signed-by=/usr/share/keyrings/pathvector.asc] https://repo.pathvector.io/apt/ stable main"
+pathvector_config_path: "/etc/pathvector.yml"
+pathvector_debug: false
+pathvector_run_script: false
+pathvector_deploy_only: false

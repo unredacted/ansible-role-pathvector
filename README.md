@@ -21,6 +21,9 @@ Examples vars:
 vars:
     pathvector_repo: "deb [signed-by=/usr/share/keyrings/pathvector.asc] https://repo.pathvector.io/apt/ stable main"
     pathvector_config_path: "/etc/pathvector.yml"
+    pathvector_debug: false
+    pathvector_run_script: false
+    pathvector_deploy_only: false
 ```
 
 Example file (where router1 is the host): `files/upstream_name/router1.yml`
@@ -57,7 +60,14 @@ peers:
 Dependencies
 ------------
 
-None.
+```
+If using scripts/update_prepends.py the following Python libraries are required to be installed.
+
+requests
+time
+ipaddress
+ruamel.yaml
+```
 
 Example Playbook
 ----------------
@@ -69,6 +79,12 @@ Example Playbook
   become: yes
   roles:
     - ansible-role-pathvector
+  vars:
+    pathvector_repo: "deb [signed-by=/usr/share/keyrings/pathvector.asc] https://repo.pathvector.io/apt/ stable main"
+    pathvector_config_path: "/etc/pathvector.yml"
+    pathvector_debug: false
+    pathvector_run_script: false
+    pathvector_deploy_only: false
 ```
 
 License

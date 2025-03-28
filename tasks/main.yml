@@ -1,46 +1,50 @@
 ---
 # tasks file for ansible-role-pathvector
 
-- name: Download Pathvector's signing key
-  ansible.builtin.get_url:
-    url: https://repo.pathvector.io/pgp.asc
-    dest: /usr/share/keyrings/pathvector.asc
-    mode: '0644'
+- name: Install Pathvector and Bird (skipped if deploy-only)
+  when: not pathvector_deploy_only
+  block:
+    - name: Download Pathvector's signing key
+      ansible.builtin.get_url:
+        url: https://repo.pathvector.io/pgp.asc
+        dest: /usr/share/keyrings/pathvector.asc
+        mode: '0644'
 
-- name: Add the Pathvector APT repository
-  apt_repository:
-    repo: "{{ pathvector_repo }}"
-    state: present
+    - name: Add the Pathvector APT repository
+      apt_repository:
+        repo: "{{ pathvector_repo }}"
+        state: present
 
-- name: Install Bird2 and Pathvector
-  apt:
-    name:
-      - bird2
-      - pathvector
-    state: present
-    update_cache: yes
+    - name: Install Bird2 and Pathvector
+      apt:
+        name:
+          - bird2
+          - pathvector
+        state: present
+        update_cache: yes
 
-- name: Start and enable the Bird service
-  systemd:
-    name: bird
-    state: started
-    enabled: yes
+    - name: Start and enable the Bird service
+      systemd:
+        name: bird
+        state: started
+        enabled: yes
 
 - name: Debug playbook directory
   debug:
     msg: "Playbook directory: {{ playbook_dir }}"
-    verbosity: 0
+  when: pathvector_debug | bool
 
 - name: List contents of files directory
   command: "ls -R {{ playbook_dir }}/files"
   delegate_to: localhost
   register: files_contents
   changed_when: false
+  when: pathvector_debug | bool
 
 - name: Debug files directory contents
   debug:
     var: files_contents.stdout_lines
-    verbosity: 0
+  when: pathvector_debug | bool
 
 - name: Find Pathvector configuration file for the host (expanded search)
   find:
@@ -52,10 +56,10 @@
   delegate_to: localhost
   register: pathvector_config_files
 
-- name: Debug found files (always show)
+- name: Debug found files
   debug:
     var: pathvector_config_files
-    verbosity: 0
+  when: pathvector_debug | bool
 
 - name: Set fact for configuration file status
   set_fact:
@@ -65,13 +69,26 @@
   set_fact:
     pathvector_config_file: "{{ pathvector_config_files.files[0].path if pathvector_config_files.matched > 0 else '' }}"
 
-- name: Debug configuration file status (always show)
+- name: Debug configuration file status
   debug:
     msg: 
       - "Config file found: {{ config_file_found }}"
       - "Config file path: {{ pathvector_config_file }}"
       - "Number of files matched: {{ pathvector_config_files.matched }}"
-    verbosity: 0
+  when: pathvector_debug | bool
+
+- name: Run prepend automation script
+  script: scripts/update_prepends.py "{{ playbook_dir }}/files"
+  delegate_to: localhost
+  run_once: true
+  register: prepend_script_result
+  when: pathvector_run_script | bool
+
+- name: Show prepend script output
+  debug:
+    var: prepend_script_result.stdout_lines
+  run_once: true
+  when: pathvector_run_script | bool
 
 - name: Copy Pathvector configuration file
   copy:
@@ -84,7 +101,7 @@
 - name: Debug copy result
   debug:
     var: copy_result
-    verbosity: 0
+  when: pathvector_debug | bool
 
 - name: Display warning if no configuration file found
   debug:
@@ -98,4 +115,4 @@
 - name: Debug generate result
   debug:
     var: generate_result
-    verbosity: 0
+  when: pathvector_debug | bool
