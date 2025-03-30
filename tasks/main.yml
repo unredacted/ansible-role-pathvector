@@ -78,7 +78,7 @@
   when: pathvector_debug | bool
 
 - name: Run prepend automation script
-  script: scripts/update_prepends.py "{{ playbook_dir }}/files" {{ pathvector_script_flags | default('') }}
+  script: scripts/update_prepends.py "{{ playbook_dir }}/files" {{ pathvector_script_flags | default('') }} --hostnames {{ ansible_play_hosts | join(',') }}
   delegate_to: localhost
   run_once: true
   register: prepend_script_result

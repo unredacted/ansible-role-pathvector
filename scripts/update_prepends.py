@@ -30,9 +30,13 @@ BGP_API_PREFIX = "https://api.bgpview.io/prefix/{prefix}"
 BGP_API_ASN = "https://api.bgpview.io/asn/{asn}/upstreams"
 BGP_API_IP = "https://api.bgpview.io/ip/{ip}"
 
-RATE_LIMIT_DELAY = 2  # seconds between API calls to avoid rate limiting
+RATE_LIMIT_DELAY = 2
 
-DEFAULT_PREPENDS = {1: 2, 2: 1, 3: 0}  # Adjusted to balance without over-penalizing Tier 1s
+PREPENDS_BY_TIER = {
+    1: 3,  # Our network has direct Tier 1 connection
+    2: 2,  # Our upstream has direct Tier 1 connection
+    3: 1   # Our upstream has no Tier 1 connection
+}
 
 def is_private_ip(ip_str):
     try:
@@ -49,60 +53,42 @@ def get_prefix_from_ip_api(ip_str):
         data = resp.json()
         prefixes = data.get("data", {}).get("prefixes", [])
         if prefixes:
-            return prefixes[0].get("prefix")
+            return prefixes[0].get("prefix"), prefixes[0].get("asn", {}).get("asn")
     except Exception as e:
         print(f"Error fetching prefix for IP {ip_str}: {e}")
-    return None
+    return None, None
 
-def classify_tier_by_asn(asn):
-    try:
-        resp = requests.get(BGP_API_ASN.format(asn=asn), timeout=10)
-        time.sleep(RATE_LIMIT_DELAY)
-        resp.raise_for_status()
-        data = resp.json()
-        upstreams = data.get('data', {}).get('ipv4_upstreams', []) + data.get('data', {}).get('ipv6_upstreams', [])
-        upstream_asns = [up['asn'] for up in upstreams if 'asn' in up]
-
-        if any(up_asn in TIER1_ASNS for up_asn in upstream_asns):
-            return 1  # Direct Tier 1 connection
-        elif upstream_asns:
-            return 2  # Indirect but not Tier 1
-        else:
-            return 3  # No upstreams or unknown
-    except Exception as e:
-        print(f"Error classifying ASN {asn}: {e}")
-    return 3
-
-def get_upstream_tiers_by_prefix(prefix):
+def get_direct_upstreams_from_prefix(prefix):
     try:
         resp = requests.get(BGP_API_PREFIX.format(prefix=prefix), timeout=10)
         time.sleep(RATE_LIMIT_DELAY)
         resp.raise_for_status()
         data = resp.json()
-        if data.get("status") != "ok":
-            return 3
-
         asns = data.get("data", {}).get("asns", [])
-        for asn_block in asns:
-            asn = asn_block.get("asn")
-            if not asn:
-                continue
-            tier = classify_tier_by_asn(asn)
-            return tier
-
+        if not asns:
+            return []
+        return [upstream.get("asn") for upstream in asns[0].get("prefix_upstreams", []) if "asn" in upstream]
     except Exception as e:
-        print(f"Error fetching prefix {prefix}: {e}")
+        print(f"Error fetching upstreams from prefix {prefix}: {e}")
+    return []
+
+def determine_tier(my_asn, prefix, prefix_asn):
+    if my_asn and int(my_asn) in TIER1_ASNS:
+        return 1
+    if prefix_asn and int(prefix_asn) in TIER1_ASNS:
+        return 1
+    upstreams = get_direct_upstreams_from_prefix(prefix)
+    if any(int(up) in TIER1_ASNS for up in upstreams):
+        return 2
     return 3
 
-def get_upstream_tiers_by_asn(asn):
-    return classify_tier_by_asn(asn)
-
-def calculate_prepends(tier, custom_prepends):
-    return custom_prepends.get(tier, 0)
-
-def update_yaml(file_path, mode="ipv4", custom_prepends=DEFAULT_PREPENDS, ignore_files=[]):
+def update_yaml(file_path, mode="ipv4", ignore_files=[], limit_hosts=[]):
     if os.path.basename(file_path) in ignore_files:
         print(f"Skipping ignored file: {file_path}")
+        return
+
+    filename_host = os.path.basename(file_path).rsplit('.', 1)[0]
+    if limit_hosts and filename_host not in limit_hosts:
         return
 
     yaml = YAML()
@@ -114,30 +100,22 @@ def update_yaml(file_path, mode="ipv4", custom_prepends=DEFAULT_PREPENDS, ignore
 
     peers = config.get('peers', {})
     changed = False
+    my_asn = config.get("asn")
 
     source_ip = config.get("source4") if mode == "ipv4" else config.get("source6")
     tier = 3
+
     if source_ip and not is_private_ip(source_ip):
-        prefix = get_prefix_from_ip_api(source_ip)
-        if prefix:
-            tier = get_upstream_tiers_by_prefix(prefix)
-    else:
-        for peer_name, peer_conf in peers.items():
-            peer_asn = peer_conf.get('asn')
-            if peer_asn:
-                tier = get_upstream_tiers_by_asn(peer_asn)
-                break
+        prefix, prefix_asn = get_prefix_from_ip_api(source_ip)
+        if prefix and prefix_asn:
+            tier = determine_tier(my_asn, prefix, prefix_asn)
+
+    prepend_count = PREPENDS_BY_TIER.get(tier, 1)
 
     for peer_name, peer_conf in peers.items():
         peer_asn = peer_conf.get('asn')
-        if not peer_asn:
+        if not peer_asn or peer_conf.get('template') != 'upstream':
             continue
-
-        # Only apply prepend logic if the template is 'upstream'
-        if peer_conf.get('template') != 'upstream':
-            continue
-
-        prepend_count = calculate_prepends(tier, custom_prepends)
 
         if 'prepends' in peer_conf:
             if peer_conf['prepends'] != prepend_count:
@@ -162,43 +140,33 @@ def update_yaml(file_path, mode="ipv4", custom_prepends=DEFAULT_PREPENDS, ignore
     else:
         print(f"No changes required for {file_path}")
 
-def parse_prepends_arg(arg):
-    try:
-        parts = arg.split(",")
-        if len(parts) != 3:
-            raise ValueError
-        return {1: int(parts[0]), 2: int(parts[1]), 3: int(parts[2])}
-    except Exception:
-        print("Invalid --prepends format. Use: --prepends 2,1,0")
-        sys.exit(1)
-
-def parse_ignore_arg(arg):
+def parse_arg_list(arg):
     return [x.strip() for x in arg.split(",") if x.strip()]
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: ./update_prepends.py <files_directory> [--ipv4|--ipv6] [--prepends 2,1,0] [--ignore config1.yml,config2.yml]")
+        print("Usage: ./update_prepends.py <files_directory> [--ipv4|--ipv6] [--ignore file1.yml,file2.yml] [--hostnames host1,host2]")
         sys.exit(1)
 
     mode = "ipv4"
-    custom_prepends = DEFAULT_PREPENDS
     ignore_files = []
+    limit_hosts = []
 
     if "--ipv6" in sys.argv:
         mode = "ipv6"
-    if "--prepends" in sys.argv:
-        try:
-            idx = sys.argv.index("--prepends") + 1
-            custom_prepends = parse_prepends_arg(sys.argv[idx])
-        except (IndexError, ValueError):
-            print("Error: --prepends flag requires a value like 2,1,0")
-            sys.exit(1)
     if "--ignore" in sys.argv:
         try:
             idx = sys.argv.index("--ignore") + 1
-            ignore_files = parse_ignore_arg(sys.argv[idx])
+            ignore_files = parse_arg_list(sys.argv[idx])
         except IndexError:
             print("Error: --ignore flag requires a comma-separated list of filenames")
+            sys.exit(1)
+    if "--hostnames" in sys.argv:
+        try:
+            idx = sys.argv.index("--hostnames") + 1
+            limit_hosts = parse_arg_list(sys.argv[idx])
+        except IndexError:
+            print("Error: --hostnames flag requires a comma-separated list")
             sys.exit(1)
 
     print("Tier 1 ASNs and Networks included in this script:")
@@ -211,7 +179,7 @@ def main():
         for filename in files:
             if filename.endswith('.yml') or filename.endswith('.yaml'):
                 file_path = os.path.join(root, filename)
-                update_yaml(file_path, mode, custom_prepends, ignore_files)
+                update_yaml(file_path, mode, ignore_files, limit_hosts)
 
 if __name__ == "__main__":
     main()
