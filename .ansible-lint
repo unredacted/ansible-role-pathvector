@@ -1,0 +1,18 @@
+---
+exclude_paths:
+  - .venv/
+  - venv/
+  - .github/
+  - molecule/
+
+skip_list:
+  - yaml[line-length]  # Lines can be long in some cases
+  - name[casing]  # Allow flexible naming
+
+warn_list:
+  - experimental  # Warn on experimental features
+  - role-name  # Warn if role name doesn't match standards
+
+enable_list:
+  - fqcn-builtins  # Use FQCN for built-in modules
+  - no-log-password  # Ensure passwords aren't logged

@@ -1,118 +1,55 @@
 ---
 # tasks file for ansible-role-pathvector
+# Main task file - detects system type and includes appropriate tasks
 
-- name: Install Pathvector and Bird (skipped if deploy-only)
-  when: not pathvector_deploy_only
-  block:
-    - name: Download Pathvector's signing key
-      ansible.builtin.get_url:
-        url: https://repo.pathvector.io/pgp.asc
-        dest: /usr/share/keyrings/pathvector.asc
-        mode: '0644'
+# System Detection
+- name: Check if /data directory exists
+  stat:
+    path: /data
+  register: data_dir_check
 
-    - name: Add the Pathvector APT repository
-      apt_repository:
-        repo: "{{ pathvector_repo }}"
-        state: present
-
-    - name: Install Bird2 and Pathvector
-      apt:
-        name:
-          - bird2
-          - pathvector
-        state: present
-        update_cache: yes
-
-    - name: Start and enable the Bird service
-      systemd:
-        name: bird
-        state: started
-        enabled: yes
-
-- name: Debug playbook directory
-  debug:
-    msg: "Playbook directory: {{ playbook_dir }}"
-  when: pathvector_debug | bool
-
-- name: List contents of files directory
-  command: "ls -R {{ playbook_dir }}/files"
-  delegate_to: localhost
-  register: files_contents
-  changed_when: false
-  when: pathvector_debug | bool
-
-- name: Debug files directory contents
-  debug:
-    var: files_contents.stdout_lines
-  when: pathvector_debug | bool
-
-- name: Find Pathvector configuration file for the host (expanded search)
+- name: Check for UniFi directories in /data
   find:
-    paths: "{{ playbook_dir }}/files"
-    patterns: 
-      - "*/{{ inventory_hostname }}.yml"
-      - "{{ inventory_hostname }}.yml"
-    recurse: yes
-  delegate_to: localhost
-  register: pathvector_config_files
+    paths: /data
+    patterns: "unifi*"
+    file_type: directory
+  register: unifi_dirs
+  when: data_dir_check.stat.exists
+  failed_when: false
 
-- name: Debug found files
-  debug:
-    var: pathvector_config_files
-  when: pathvector_debug | bool
-
-- name: Set fact for configuration file status
+- name: Set UniFi system fact
   set_fact:
-    config_file_found: "{{ pathvector_config_files.matched > 0 }}"
+    is_unifi_system: "{{ data_dir_check.stat.exists and unifi_dirs.matched | default(0) > 0 }}"
 
-- name: Set fact for found configuration file
-  set_fact:
-    pathvector_config_file: "{{ pathvector_config_files.files[0].path if pathvector_config_files.matched > 0 else '' }}"
-
-- name: Debug configuration file status
+- name: Display system detection result
   debug:
-    msg: 
-      - "Config file found: {{ config_file_found }}"
-      - "Config file path: {{ pathvector_config_file }}"
-      - "Number of files matched: {{ pathvector_config_files.matched }}"
+    msg:
+      - "System type detection:"
+      - "  UniFi system: {{ is_unifi_system }}"
+      - "  /data exists: {{ data_dir_check.stat.exists }}"
+      - "  UniFi dirs found: {{ unifi_dirs.matched | default(0) }}"
   when: pathvector_debug | bool
 
-- name: Run prepend automation script
-  script: scripts/update_prepends.py "{{ playbook_dir }}/files" {{ pathvector_script_flags | default('') }} --hostnames {{ ansible_play_hosts | join(',') }}
-  delegate_to: localhost
-  run_once: true
-  register: prepend_script_result
-  when: pathvector_run_script | bool
+# Find configuration files (common for both systems)
+- name: Include common configuration tasks
+  include_tasks: common.yml
 
-- name: Show prepend script output
+# System-specific deployment
+- name: Deploy to UniFi system
+  include_tasks: unifi.yml
+  when: is_unifi_system | bool
+
+- name: Deploy to standard Debian system
+  include_tasks: debian.yml
+  when:
+    - not is_unifi_system | bool
+    - not pathvector_deploy_only
+
+# Post-deployment tasks (if any)
+- name: Display deployment summary
   debug:
-    var: prepend_script_result.stdout_lines
-  run_once: true
-  when: pathvector_run_script | bool
-
-- name: Copy Pathvector configuration file
-  copy:
-    src: "{{ pathvector_config_file }}"
-    dest: "{{ pathvector_config_path }}"
-    backup: yes
-  when: config_file_found | bool
-  register: copy_result
-
-- name: Debug copy result
-  debug:
-    var: copy_result
-  when: pathvector_debug | bool
-
-- name: Display warning if no configuration file found
-  debug:
-    msg: "Warning: No configuration file found for {{ inventory_hostname }}"
-  when: not config_file_found | bool
-
-- name: Generate Pathvector configuration
-  command: pathvector generate
-  register: generate_result
-
-- name: Debug generate result
-  debug:
-    var: generate_result
+    msg:
+      - "Deployment completed for {{ inventory_hostname }}"
+      - "System type: {{ 'UniFi' if is_unifi_system else 'Standard Debian' }}"
+      - "Configuration deployed: {{ 'Yes' if config_file_found else 'No' }}"
   when: pathvector_debug | bool

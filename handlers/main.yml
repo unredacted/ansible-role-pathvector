@@ -1,2 +1,23 @@
 ---
 # handlers file for ansible-role-pathvector
+
+- name: reload bird
+  systemd:
+    name: bird
+    state: reloaded
+  when: not is_unifi_system | bool
+
+- name: restart bird
+  systemd:
+    name: bird
+    state: restarted
+  when: not is_unifi_system | bool
+
+- name: regenerate pathvector
+  command: pathvector generate
+  notify: reload bird
+  when: not is_unifi_system | bool
+
+- name: run unifi setup script
+  command: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
+  when: is_unifi_system | bool

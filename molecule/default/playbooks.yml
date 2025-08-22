@@ -1,0 +1,199 @@
+# molecule/default/prepare.yml
+---
+- name: Prepare test environment
+  hosts: all
+  become: true
+  tasks:
+    - name: Install systemd (if needed)
+      package:
+        name: systemd
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Create UniFi-like environment for UniFi simulation hosts
+      when: molecule_unifi_simulation | default(false)
+      block:
+        - name: Create /data directory
+          file:
+            path: /data
+            state: directory
+            mode: '0755'
+
+        - name: Create UniFi directory
+          file:
+            path: /data/unifi
+            state: directory
+            mode: '0755'
+
+        - name: Create on_boot.d directory
+          file:
+            path: /data/on_boot.d
+            state: directory
+            mode: '0755'
+
+    - name: Install required packages for testing
+      package:
+        name:
+          - curl
+          - gnupg
+          - apt-transport-https
+        state: present
+
+---
+# molecule/default/converge.yml
+---
+- name: Converge
+  hosts: all
+  become: true
+
+  pre_tasks:
+    - name: Create test configuration files
+      delegate_to: localhost
+      block:
+        - name: Create files directory
+          file:
+            path: "{{ playbook_dir }}/files"
+            state: directory
+          run_once: true
+
+        - name: Create test pathvector config for each host
+          copy:
+            dest: "{{ playbook_dir }}/files/{{ item }}.yml"
+            content: |
+              asn: 65001
+              router-id: 10.0.0.1
+              source4: 10.0.0.1
+              source6: fd00::1
+
+              prefixes:
+                - 10.0.0.0/24
+                - fd00::/48
+
+              rtr-server: rtr.rpki.cloudflare.com:8282
+
+              templates:
+                upstream:
+                  interpret-communities: true
+                  filter-max-prefix: true
+                  filter-rpki: true
+                  filter-bogon-routes: true
+                  filter-bogon-asns: true
+
+              peers:
+                test_peer:
+                  asn: 65002
+                  template: upstream
+                  neighbors:
+                    - 10.0.1.1
+                    - fd00:1::1
+          loop: "{{ groups['all'] }}"
+          run_once: true
+
+  roles:
+    - ansible-role-pathvector
+
+---
+# molecule/default/verify.yml
+---
+- name: Verify deployment
+  hosts: all
+  become: true
+  gather_facts: true
+
+  tasks:
+    # Common verifications
+    - name: Check if configuration was found
+      assert:
+        that:
+          - config_file_found is defined
+          - config_file_found | bool
+        fail_msg: "Configuration file was not found"
+
+    # UniFi-specific verifications
+    - name: Verify UniFi deployment
+      when: is_unifi_system | default(false) | bool
+      block:
+        - name: Check if on-boot script exists
+          stat:
+            path: "/data/on_boot.d/1-unifi-pathvector-setup.sh"
+          register: unifi_script
+
+        - name: Assert on-boot script was deployed
+          assert:
+            that:
+              - unifi_script.stat.exists
+              - unifi_script.stat.mode == '0755'
+            fail_msg: "UniFi on-boot script not properly deployed"
+
+        - name: Check if persistent config exists
+          stat:
+            path: /data/on_boot.d/pathvector.yml
+          register: unifi_config
+
+        - name: Assert persistent config was deployed
+          assert:
+            that:
+              - unifi_config.stat.exists
+            fail_msg: "UniFi persistent config not deployed"
+
+        - name: Check if log file was created
+          stat:
+            path: /var/log/unifi-pathvector-setup.log
+          register: unifi_log
+
+        - name: Display UniFi verification results
+          debug:
+            msg:
+              - "UniFi system verified"
+              - "On-boot script: {{ unifi_script.stat.exists }}"
+              - "Persistent config: {{ unifi_config.stat.exists }}"
+              - "Log file created: {{ unifi_log.stat.exists }}"
+
+    # Debian-specific verifications
+    - name: Verify Debian deployment
+      when: not (is_unifi_system | default(false) | bool)
+      block:
+        - name: Check if bird2 is installed
+          command: which bird
+          register: bird_check
+          changed_when: false
+          failed_when: false
+
+        - name: Check if pathvector is installed
+          command: which pathvector
+          register: pathvector_check
+          changed_when: false
+          failed_when: false
+
+        - name: Assert packages are installed
+          assert:
+            that:
+              - bird_check.rc == 0
+              - pathvector_check.rc == 0
+            fail_msg: "Required packages not installed on Debian system"
+
+        - name: Check if configuration exists
+          stat:
+            path: /etc/pathvector.yml
+          register: debian_config
+
+        - name: Assert configuration was deployed
+          assert:
+            that:
+              - debian_config.stat.exists
+            fail_msg: "Configuration not deployed to /etc/pathvector.yml"
+
+        - name: Check Bird service status
+          systemd:
+            name: bird
+            state: started
+          register: bird_service
+          failed_when: false
+
+        - name: Display Debian verification results
+          debug:
+            msg:
+              - "Debian system verified"
+              - "Bird installed: {{ bird_check.rc == 0 }}"
+              - "Pathvector installed: {{ pathvector_check.rc == 0 }}"
+              - "Config deployed: {{ debian_config.stat.exists }}"

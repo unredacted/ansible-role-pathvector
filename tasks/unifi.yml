@@ -1,0 +1,154 @@
+---
+# Tasks for UniFi systems
+
+- name: UniFi system deployment
+  when: pathvector_deploy_unifi_script | default(true)
+  block:
+    - name: Display UniFi deployment information
+      debug:
+        msg:
+          - "=== UniFi System Detected ==="
+          - "Deploying on-boot script for persistent installation"
+          - "Script name: {{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
+      when: pathvector_debug | bool
+
+    - name: Ensure UniFi on_boot.d directory exists
+      file:
+        path: /data/on_boot.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      register: onboot_dir_result
+
+    - name: Deploy UniFi pathvector setup script from template
+      template:
+        src: unifi-pathvector-setup.sh.j2
+        dest: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
+        owner: root
+        group: root
+        mode: '0755'
+        backup: yes
+      register: unifi_script_deployed
+
+    - name: Display script deployment result
+      debug:
+        msg:
+          - "Script deployed: {{ unifi_script_deployed.changed }}"
+          - "Script location: /data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
+      when: pathvector_debug | bool
+
+# Deploy configuration to persistent location
+- name: Deploy Pathvector configuration to UniFi persistent storage
+  when: config_file_found | bool
+  block:
+    - name: Copy pathvector configuration to UniFi persistent location
+      copy:
+        src: "{{ pathvector_config_file }}"
+        dest: /data/on_boot.d/pathvector.yml
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      register: unifi_config_deployed
+
+    - name: Display configuration deployment result
+      debug:
+        msg:
+          - "Configuration deployed to persistent storage: {{ unifi_config_deployed.changed }}"
+          - "Location: /data/on_boot.d/pathvector.yml"
+      when: pathvector_debug | bool
+
+    # Also copy to /etc for immediate use if requested
+    - name: Copy configuration to /etc for immediate use
+      copy:
+        src: "{{ pathvector_config_file }}"
+        dest: "{{ pathvector_config_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      when: pathvector_unifi_run_immediately | default(false)
+      register: etc_config_deployed
+
+# Run the UniFi setup script if requested
+- name: Execute UniFi setup script
+  when:
+    - pathvector_unifi_run_immediately | default(false)
+    - unifi_script_deployed is defined
+  block:
+    - name: Run UniFi pathvector setup script
+      command: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
+      register: unifi_script_result
+      changed_when: "'Installation completed successfully' in unifi_script_result.stdout"
+      failed_when: unifi_script_result.rc != 0
+
+    - name: Display setup script output
+      debug:
+        var: unifi_script_result.stdout_lines
+      when: unifi_script_result is defined
+
+    - name: Check installation log
+      command: "tail -n 20 /var/log/unifi-pathvector-setup.log"
+      register: setup_log
+      changed_when: false
+      failed_when: false
+
+    - name: Display recent log entries
+      debug:
+        msg: "Recent log entries:"
+        var: setup_log.stdout_lines
+      when:
+        - pathvector_debug | bool
+        - setup_log.stdout_lines is defined
+
+# Verify UniFi deployment
+- name: Verify UniFi deployment
+  when: pathvector_debug | bool
+  block:
+    - name: Check if on-boot script exists
+      stat:
+        path: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
+      register: script_stat
+
+    - name: Check if persistent config exists
+      stat:
+        path: /data/on_boot.d/pathvector.yml
+      register: config_stat
+
+    - name: Check if bird2 is installed (if script was run)
+      command: which bird
+      register: bird_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Check if pathvector is installed (if script was run)
+      command: which pathvector
+      register: pathvector_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Display UniFi deployment summary
+      debug:
+        msg:
+          - "=== UniFi Deployment Summary ==="
+          - "On-boot script: {{ 'Deployed' if script_stat.stat.exists else 'Not found' }}"
+          - "Persistent config: {{ 'Deployed' if config_stat.stat.exists else 'Not found' }}"
+          - "Bird2 installed: {{ 'Yes' if bird_installed.rc == 0 else 'No' }}"
+          - "Pathvector installed: {{ 'Yes' if pathvector_installed.rc == 0 else 'No' }}"
+          - "Script will run automatically on next boot"
+
+# Optional: Manual installation without waiting for reboot
+- name: Provide manual installation instructions
+  debug:
+    msg:
+      - "=== Manual Installation Instructions ==="
+      - "To install immediately without waiting for reboot:"
+      - "  ssh root@{{ inventory_hostname }}"
+      - "  /data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
+      - ""
+      - "To check installation status:"
+      - "  tail -f /var/log/unifi-pathvector-setup.log"
+  when:
+    - not (pathvector_unifi_run_immediately | default(false))
+    - pathvector_debug | bool

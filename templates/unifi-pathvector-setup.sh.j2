@@ -1,0 +1,144 @@
+#!/bin/bash
+# UniFi on-boot script to install bird2 and pathvector
+# Auto-deployed by Ansible
+# Place this file in /data/on_boot.d/ (UniFi OS) or /config/scripts/post-config.d/ (EdgeOS)
+# Make it executable: chmod +x /data/on_boot.d/1-unifi-pathvector-setup.sh
+
+# Configuration Variables (templated by Ansible)
+PGP_KEY_URL="{{ pathvector_pgp_key_url | default('https://repo.pathvector.io/pgp.asc') }}"
+REPO_URL="{{ pathvector_repo_url | default('https://repo.pathvector.io/apt/') }}"
+REPO_DIST="{{ pathvector_repo_dist | default('stable') }}"
+REPO_COMPONENT="{{ pathvector_repo_component | default('main') }}"
+
+# Script Configuration
+SCRIPT_NAME="unifi-pathvector-setup"
+LOG_FILE="/var/log/${SCRIPT_NAME}.log"
+CONFIG_SOURCE="/data/on_boot.d/pathvector.yml"
+CONFIG_DEST="{{ pathvector_config_path | default('/etc/pathvector.yml') }}"
+
+# Function to log messages
+log_message() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+# Function to setup pathvector configuration
+setup_pathvector_config() {
+    log_message "Setting up pathvector configuration..."
+
+    # Check if source config exists
+    if [ ! -f "$CONFIG_SOURCE" ]; then
+        log_message "WARNING: Source configuration file $CONFIG_SOURCE not found, skipping config setup"
+        return 1
+    fi
+
+    # Copy configuration file
+    log_message "Copying pathvector configuration from $CONFIG_SOURCE to $CONFIG_DEST"
+    if cp "$CONFIG_SOURCE" "$CONFIG_DEST"; then
+        log_message "Configuration copied successfully"
+
+        # Generate pathvector configuration
+        log_message "Running pathvector generate..."
+        if pathvector generate 2>&1 | tee -a "$LOG_FILE"; then
+            log_message "pathvector generate completed successfully"
+            return 0
+        else
+            log_message "ERROR: pathvector generate failed"
+            return 1
+        fi
+    else
+        log_message "ERROR: Failed to copy configuration file"
+        return 1
+    fi
+}
+
+# Main Script Start
+log_message "Starting $SCRIPT_NAME"
+
+# Check if packages are already installed
+if command -v pathvector >/dev/null 2>&1 && command -v bird >/dev/null 2>&1; then
+    log_message "bird2 and pathvector are already installed"
+
+    # Even if installed, setup configuration if it exists
+    setup_pathvector_config
+
+    log_message "$SCRIPT_NAME completed (packages already installed)"
+    exit 0
+fi
+
+log_message "Installing bird2 and pathvector..."
+
+# Add pathvector repository key
+if ! [ -f /usr/share/keyrings/pathvector.asc ]; then
+    log_message "Adding pathvector repository key from $PGP_KEY_URL..."
+    if curl -fsSL "$PGP_KEY_URL" > /usr/share/keyrings/pathvector.asc; then
+        log_message "Repository key added successfully"
+    else
+        log_message "ERROR: Failed to download repository key from $PGP_KEY_URL"
+        exit 1
+    fi
+else
+    log_message "Repository key already exists"
+fi
+
+# Add pathvector repository
+if ! [ -f /etc/apt/sources.list.d/pathvector.list ]; then
+    log_message "Adding pathvector repository..."
+    echo "deb [signed-by=/usr/share/keyrings/pathvector.asc] $REPO_URL $REPO_DIST $REPO_COMPONENT" > /etc/apt/sources.list.d/pathvector.list
+    log_message "Repository added: $REPO_URL $REPO_DIST $REPO_COMPONENT"
+else
+    log_message "Repository already configured"
+fi
+
+# Update package list
+log_message "Updating package list..."
+if apt-get update >/dev/null 2>&1; then
+    log_message "Package list updated successfully"
+else
+    log_message "WARNING: Failed to update package list completely"
+fi
+
+# Install packages
+log_message "Installing pathvector and bird2..."
+if DEBIAN_FRONTEND=noninteractive apt-get install -y pathvector bird2 >/dev/null 2>&1; then
+    log_message "Installation completed successfully"
+
+    # Verify installation
+    if command -v pathvector >/dev/null 2>&1; then
+        PATHVECTOR_VERSION=$(pathvector version 2>/dev/null || echo "unknown")
+        log_message "pathvector installed: version $PATHVECTOR_VERSION"
+    else
+        log_message "WARNING: pathvector command not found after installation"
+    fi
+
+    if command -v bird >/dev/null 2>&1; then
+        BIRD_VERSION=$(bird --version 2>&1 | head -n1 || echo "unknown")
+        log_message "bird2 installed: $BIRD_VERSION"
+    else
+        log_message "WARNING: bird command not found after installation"
+    fi
+
+    # Setup pathvector configuration after successful installation
+    setup_pathvector_config
+
+else
+    log_message "ERROR: Failed to install packages"
+    exit 1
+fi
+
+{% if pathvector_unifi_autostart_services | default(false) %}
+# Start/restart services
+log_message "Starting bird service..."
+systemctl restart bird
+log_message "Starting pathvector service..."
+systemctl restart pathvector
+{% else %}
+# Optional: Start/restart services if needed
+# Uncomment the following lines if you want to start the services automatically
+# log_message "Starting bird service..."
+# systemctl restart bird
+# log_message "Starting pathvector service..."
+# systemctl restart pathvector
+{% endif %}
+
+log_message "$SCRIPT_NAME completed successfully"
+exit 0

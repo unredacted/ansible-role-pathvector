@@ -1,0 +1,59 @@
+---
+# Molecule testing configuration for ansible-role-pathvector
+dependency:
+  name: galaxy
+
+driver:
+  name: docker
+
+platforms:
+  # Standard Debian test
+  - name: debian12
+    image: debian:12
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    capabilities:
+      - SYS_ADMIN
+    tmpfs:
+      - /run
+      - /tmp
+    groups:
+      - debian_routers
+
+  # Simulated UniFi environment
+  - name: unifi-sim
+    image: debian:12
+    pre_build_image: true
+    command: /lib/systemd/systemd
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:ro
+    capabilities:
+      - SYS_ADMIN
+    tmpfs:
+      - /run
+      - /tmp
+    groups:
+      - unifi_routers
+
+provisioner:
+  name: ansible
+  inventory:
+    group_vars:
+      all:
+        pathvector_debug: true
+        pathvector_unifi_run_immediately: true
+    host_vars:
+      unifi-sim:
+        # Create UniFi-like environment for testing
+        molecule_unifi_simulation: true
+  playbooks:
+    prepare: prepare.yml
+    converge: converge.yml
+    verify: verify.yml
+
+verifier:
+  name: ansible

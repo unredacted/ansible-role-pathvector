@@ -1,0 +1,83 @@
+---
+# Common tasks for both UniFi and Debian systems
+
+# Debug information
+- name: Debug playbook directory
+  debug:
+    msg: "Playbook directory: {{ playbook_dir }}"
+  when: pathvector_debug | bool
+
+- name: List contents of files directory
+  command: "ls -R {{ playbook_dir }}/files"
+  delegate_to: localhost
+  register: files_contents
+  changed_when: false
+  when: pathvector_debug | bool
+  failed_when: false
+
+- name: Debug files directory contents
+  debug:
+    var: files_contents.stdout_lines
+  when:
+    - pathvector_debug | bool
+    - files_contents is defined
+
+# Find configuration files
+- name: Find Pathvector configuration file for the host
+  find:
+    paths: "{{ playbook_dir }}/files"
+    patterns:
+      - "*/{{ inventory_hostname }}.yml"
+      - "{{ inventory_hostname }}.yml"
+      - "*/{{ inventory_hostname }}.yaml"
+      - "{{ inventory_hostname }}.yaml"
+    recurse: yes
+  delegate_to: localhost
+  register: pathvector_config_files
+  failed_when: false
+
+- name: Debug found configuration files
+  debug:
+    var: pathvector_config_files
+  when: pathvector_debug | bool
+
+- name: Set fact for configuration file status
+  set_fact:
+    config_file_found: "{{ pathvector_config_files.matched | default(0) > 0 }}"
+
+- name: Set fact for found configuration file
+  set_fact:
+    pathvector_config_file: "{{ pathvector_config_files.files[0].path if config_file_found else '' }}"
+
+- name: Display configuration file status
+  debug:
+    msg:
+      - "Config file found: {{ config_file_found }}"
+      - "Config file path: {{ pathvector_config_file | default('None') }}"
+      - "Number of files matched: {{ pathvector_config_files.matched | default(0) }}"
+  when: pathvector_debug | bool
+
+- name: Display warning if no configuration file found
+  debug:
+    msg: "⚠️  Warning: No configuration file found for {{ inventory_hostname }} in {{ playbook_dir }}/files/"
+  when: not config_file_found | bool
+
+# Prepend automation script (runs before deployment)
+- name: Run prepend automation script
+  script: scripts/update_prepends.py "{{ playbook_dir }}/files" {{ pathvector_script_flags | default('') }} --hostnames {{ ansible_play_hosts | join(',') }}
+  delegate_to: localhost
+  run_once: true
+  register: prepend_script_result
+  when:
+    - pathvector_run_script | bool
+    - config_file_found | bool
+  failed_when: false
+
+- name: Show prepend script output
+  debug:
+    var: prepend_script_result.stdout_lines
+  run_once: true
+  when:
+    - pathvector_run_script | bool
+    - prepend_script_result is defined
+    - prepend_script_result.stdout_lines is defined
