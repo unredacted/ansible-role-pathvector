@@ -3,7 +3,6 @@
   hosts: all
   become: true
   vars:
-    playbook_dir: /root
     pathvector_skip_install: true
     pathvector_debug: true
     pathvector_run_script: false
@@ -11,15 +10,18 @@
     pathvector_deploy_only: false
   
   pre_tasks:
-    - name: Create files directory
+    - name: Create local files directory
       ansible.builtin.file:
-        path: /root/files
+        path: "{{ playbook_dir }}/files"
         state: directory
         mode: '0755'
+      delegate_to: localhost
+      become: false
+      run_once: true
     
-    - name: Create test config file
+    - name: Create test config file for instance
       ansible.builtin.copy:
-        dest: /root/files/instance.yml
+        dest: "{{ playbook_dir }}/files/instance.yml"
         content: |
           asn: 65001
           router-id: 10.0.0.1
@@ -27,7 +29,14 @@
           source6: fd00::1
           prefixes:
             - 10.0.0.0/24
+      delegate_to: localhost
+      become: false
+      run_once: true
   
   tasks:
     - name: Import pathvector role tasks
       ansible.builtin.import_tasks: ../../tasks/main.yml
+  
+  handlers:
+    - name: Import handlers
+      ansible.builtin.import_tasks: ../../handlers/main.yml

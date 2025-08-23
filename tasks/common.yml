@@ -10,6 +10,7 @@
 - name: List contents of files directory
   ansible.builtin.command: "ls -R {{ playbook_dir }}/files"
   delegate_to: localhost
+  become: false
   register: files_contents
   changed_when: false
   when: pathvector_debug | bool
@@ -33,6 +34,7 @@
       - "{{ inventory_hostname }}.yaml"
     recurse: yes
   delegate_to: localhost
+  become: false
   register: pathvector_config_files
   failed_when: false
 
@@ -66,6 +68,7 @@
 - name: Run prepend automation script
   ansible.builtin.script: scripts/update_prepends.py "{{ playbook_dir }}/files" {{ pathvector_script_flags | default('') }} --hostnames {{ ansible_play_hosts | join(',') }}
   delegate_to: localhost
+  become: false
   run_once: true
   register: prepend_script_result
   when:

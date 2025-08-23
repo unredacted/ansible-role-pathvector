@@ -118,7 +118,10 @@
     - name: Display Bird validation result
       ansible.builtin.debug:
         msg: "Bird configuration {{ 'valid' if bird_validate.rc == 0 else 'invalid' }}"
-      when: pathvector_debug | bool
+      when:
+        - pathvector_debug | bool
+        - bird_validate is defined
+        - bird_validate.rc is defined
 
 # Optional: Display final status
 - name: Debian deployment summary
