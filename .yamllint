@@ -32,4 +32,3 @@ ignore: |
   .venv/
   venv/
   .github/
-  molecule/
