@@ -11,19 +11,21 @@
       register: repo_key_result
 
     - name: Add Pathvector APT repository
-      apt_repository:
+      ansible.builtin.apt_repository:
         repo: "{{ pathvector_repo }}"
         state: present
         filename: pathvector
       register: repo_add_result
 
     - name: Update APT cache after adding repository
-      apt:
+      ansible.builtin.apt:
         update_cache: yes
       when: repo_add_result.changed
+      tags:
+        - skip_ansible_lint
 
     - name: Install Bird2 and Pathvector packages
-      apt:
+      ansible.builtin.apt:
         name:
           - bird2
           - pathvector
@@ -32,12 +34,12 @@
       register: install_result
 
     - name: Display installation result
-      debug:
+      ansible.builtin.debug:
         msg: "Packages installed: {{ install_result.changed }}"
       when: pathvector_debug | bool
 
     - name: Ensure Bird service is started and enabled
-      systemd:
+      ansible.builtin.systemd:
         name: bird
         state: started
         enabled: yes
@@ -45,21 +47,21 @@
       register: bird_service_result
 
     - name: Check Bird service status
-      systemd:
+      ansible.builtin.systemd:
         name: bird
         state: started
       register: bird_status
       failed_when: false
 
     - name: Display Bird service status
-      debug:
+      ansible.builtin.debug:
         msg:
           - "Bird service active: {{ bird_status.status.ActiveState | default('unknown') }}"
       when: pathvector_debug | bool
 
   rescue:
     - name: Display installation error
-      debug:
+      ansible.builtin.debug:
         msg: "Error during Debian package installation. Check logs for details."
       failed_when: true
 
@@ -68,7 +70,7 @@
   when: config_file_found | bool
   block:
     - name: Copy Pathvector configuration file
-      copy:
+      ansible.builtin.copy:
         src: "{{ pathvector_config_file }}"
         dest: "{{ pathvector_config_path }}"
         owner: root
@@ -79,39 +81,39 @@
       notify: regenerate pathvector
 
     - name: Display configuration deployment result
-      debug:
+      ansible.builtin.debug:
         msg:
           - "Configuration deployed: {{ config_copy_result.changed }}"
           - "Destination: {{ pathvector_config_path }}"
       when: pathvector_debug | bool
 
     - name: Generate Pathvector configuration
-      command: pathvector generate
+      ansible.builtin.command: pathvector generate
       register: generate_result
       changed_when: generate_result.rc == 0
       notify: reload bird
 
     - name: Display Pathvector generate output
-      debug:
+      ansible.builtin.debug:
         var: generate_result.stdout_lines
       when:
         - pathvector_debug | bool
         - generate_result.stdout_lines is defined
 
     - name: Validate Bird configuration
-      command: bird -p
+      ansible.builtin.command: bird -p
       register: bird_validate
       changed_when: false
       failed_when: false
 
     - name: Display Bird validation result
-      debug:
+      ansible.builtin.debug:
         msg: "Bird configuration {{ 'valid' if bird_validate.rc == 0 else 'invalid' }}"
       when: pathvector_debug | bool
 
 # Optional: Display final status
 - name: Debian deployment summary
-  debug:
+  ansible.builtin.debug:
     msg:
       - "=== Debian Deployment Summary ==="
       - "Packages installed: {{ 'bird2, pathvector' if install_result.changed else 'Already installed' }}"

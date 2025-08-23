@@ -3,12 +3,12 @@
 
 # Debug information
 - name: Debug playbook directory
-  debug:
+  ansible.builtin.debug:
     msg: "Playbook directory: {{ playbook_dir }}"
   when: pathvector_debug | bool
 
 - name: List contents of files directory
-  command: "ls -R {{ playbook_dir }}/files"
+  ansible.builtin.command: "ls -R {{ playbook_dir }}/files"
   delegate_to: localhost
   register: files_contents
   changed_when: false
@@ -16,7 +16,7 @@
   failed_when: false
 
 - name: Debug files directory contents
-  debug:
+  ansible.builtin.debug:
     var: files_contents.stdout_lines
   when:
     - pathvector_debug | bool
@@ -24,7 +24,7 @@
 
 # Find configuration files
 - name: Find Pathvector configuration file for the host
-  find:
+  ansible.builtin.find:
     paths: "{{ playbook_dir }}/files"
     patterns:
       - "*/{{ inventory_hostname }}.yml"
@@ -37,20 +37,20 @@
   failed_when: false
 
 - name: Debug found configuration files
-  debug:
+  ansible.builtin.debug:
     var: pathvector_config_files
   when: pathvector_debug | bool
 
 - name: Set fact for configuration file status
-  set_fact:
+  ansible.builtin.set_fact:
     config_file_found: "{{ pathvector_config_files.matched | default(0) > 0 }}"
 
 - name: Set fact for found configuration file
-  set_fact:
+  ansible.builtin.set_fact:
     pathvector_config_file: "{{ pathvector_config_files.files[0].path if config_file_found else '' }}"
 
 - name: Display configuration file status
-  debug:
+  ansible.builtin.debug:
     msg:
       - "Config file found: {{ config_file_found }}"
       - "Config file path: {{ pathvector_config_file | default('None') }}"
@@ -58,13 +58,13 @@
   when: pathvector_debug | bool
 
 - name: Display warning if no configuration file found
-  debug:
+  ansible.builtin.debug:
     msg: "⚠️  Warning: No configuration file found for {{ inventory_hostname }} in {{ playbook_dir }}/files/"
   when: not config_file_found | bool
 
 # Prepend automation script (runs before deployment)
 - name: Run prepend automation script
-  script: scripts/update_prepends.py "{{ playbook_dir }}/files" {{ pathvector_script_flags | default('') }} --hostnames {{ ansible_play_hosts | join(',') }}
+  ansible.builtin.script: scripts/update_prepends.py "{{ playbook_dir }}/files" {{ pathvector_script_flags | default('') }} --hostnames {{ ansible_play_hosts | join(',') }}
   delegate_to: localhost
   run_once: true
   register: prepend_script_result
@@ -74,7 +74,7 @@
   failed_when: false
 
 - name: Show prepend script output
-  debug:
+  ansible.builtin.debug:
     var: prepend_script_result.stdout_lines
   run_once: true
   when:

@@ -4,12 +4,12 @@
 
 # System Detection
 - name: Check if /data directory exists
-  stat:
+  ansible.builtin.stat:
     path: /data
   register: data_dir_check
 
 - name: Check for UniFi directories in /data
-  find:
+  ansible.builtin.find:
     paths: /data
     patterns: "unifi*"
     file_type: directory
@@ -18,11 +18,11 @@
   failed_when: false
 
 - name: Set UniFi system fact
-  set_fact:
+  ansible.builtin.set_fact:
     is_unifi_system: "{{ data_dir_check.stat.exists and unifi_dirs.matched | default(0) > 0 }}"
 
 - name: Display system detection result
-  debug:
+  ansible.builtin.debug:
     msg:
       - "System type detection:"
       - "  UniFi system: {{ is_unifi_system }}"
@@ -32,22 +32,22 @@
 
 # Find configuration files (common for both systems)
 - name: Include common configuration tasks
-  include_tasks: common.yml
+  ansible.builtin.include_tasks: common.yml
 
 # System-specific deployment
 - name: Deploy to UniFi system
-  include_tasks: unifi.yml
+  ansible.builtin.include_tasks: unifi.yml
   when: is_unifi_system | bool
 
 - name: Deploy to standard Debian system
-  include_tasks: debian.yml
+  ansible.builtin.include_tasks: debian.yml
   when:
     - not is_unifi_system | bool
     - not pathvector_deploy_only
 
 # Post-deployment tasks (if any)
 - name: Display deployment summary
-  debug:
+  ansible.builtin.debug:
     msg:
       - "Deployment completed for {{ inventory_hostname }}"
       - "System type: {{ 'UniFi' if is_unifi_system else 'Standard Debian' }}"

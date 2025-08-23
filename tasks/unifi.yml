@@ -5,7 +5,7 @@
   when: pathvector_deploy_unifi_script | default(true)
   block:
     - name: Display UniFi deployment information
-      debug:
+      ansible.builtin.debug:
         msg:
           - "=== UniFi System Detected ==="
           - "Deploying on-boot script for persistent installation"
@@ -13,7 +13,7 @@
       when: pathvector_debug | bool
 
     - name: Ensure UniFi on_boot.d directory exists
-      file:
+      ansible.builtin.file:
         path: /data/on_boot.d
         state: directory
         owner: root
@@ -22,7 +22,7 @@
       register: onboot_dir_result
 
     - name: Deploy UniFi pathvector setup script from template
-      template:
+      ansible.builtin.template:
         src: unifi-pathvector-setup.sh.j2
         dest: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
         owner: root
@@ -32,7 +32,7 @@
       register: unifi_script_deployed
 
     - name: Display script deployment result
-      debug:
+      ansible.builtin.debug:
         msg:
           - "Script deployed: {{ unifi_script_deployed.changed }}"
           - "Script location: /data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
@@ -43,7 +43,7 @@
   when: config_file_found | bool
   block:
     - name: Copy pathvector configuration to UniFi persistent location
-      copy:
+      ansible.builtin.copy:
         src: "{{ pathvector_config_file }}"
         dest: /data/on_boot.d/pathvector.yml
         owner: root
@@ -53,7 +53,7 @@
       register: unifi_config_deployed
 
     - name: Display configuration deployment result
-      debug:
+      ansible.builtin.debug:
         msg:
           - "Configuration deployed to persistent storage: {{ unifi_config_deployed.changed }}"
           - "Location: /data/on_boot.d/pathvector.yml"
@@ -61,7 +61,7 @@
 
     # Also copy to /etc for immediate use if requested
     - name: Copy configuration to /etc for immediate use
-      copy:
+      ansible.builtin.copy:
         src: "{{ pathvector_config_file }}"
         dest: "{{ pathvector_config_path }}"
         owner: root
@@ -78,24 +78,24 @@
     - unifi_script_deployed is defined
   block:
     - name: Run UniFi pathvector setup script
-      command: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
+      ansible.builtin.command: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
       register: unifi_script_result
       changed_when: "'Installation completed successfully' in unifi_script_result.stdout"
       failed_when: unifi_script_result.rc != 0
 
     - name: Display setup script output
-      debug:
+      ansible.builtin.debug:
         var: unifi_script_result.stdout_lines
       when: unifi_script_result is defined
 
     - name: Check installation log
-      command: "tail -n 20 /var/log/unifi-pathvector-setup.log"
+      ansible.builtin.command: "tail -n 20 /var/log/unifi-pathvector-setup.log"
       register: setup_log
       changed_when: false
       failed_when: false
 
     - name: Display recent log entries
-      debug:
+      ansible.builtin.debug:
         msg: "Recent log entries:"
         var: setup_log.stdout_lines
       when:
@@ -107,29 +107,29 @@
   when: pathvector_debug | bool
   block:
     - name: Check if on-boot script exists
-      stat:
+      ansible.builtin.stat:
         path: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
       register: script_stat
 
     - name: Check if persistent config exists
-      stat:
+      ansible.builtin.stat:
         path: /data/on_boot.d/pathvector.yml
       register: config_stat
 
     - name: Check if bird2 is installed (if script was run)
-      command: which bird
+      ansible.builtin.command: which bird
       register: bird_installed
       changed_when: false
       failed_when: false
 
     - name: Check if pathvector is installed (if script was run)
-      command: which pathvector
+      ansible.builtin.command: which pathvector
       register: pathvector_installed
       changed_when: false
       failed_when: false
 
     - name: Display UniFi deployment summary
-      debug:
+      ansible.builtin.debug:
         msg:
           - "=== UniFi Deployment Summary ==="
           - "On-boot script: {{ 'Deployed' if script_stat.stat.exists else 'Not found' }}"
@@ -140,7 +140,7 @@
 
 # Optional: Manual installation without waiting for reboot
 - name: Provide manual installation instructions
-  debug:
+  ansible.builtin.debug:
     msg:
       - "=== Manual Installation Instructions ==="
       - "To install immediately without waiting for reboot:"

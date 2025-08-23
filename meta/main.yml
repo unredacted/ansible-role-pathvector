@@ -1,11 +1,14 @@
+---
 galaxy_info:
-  author: Zach
+  role_name: pathvector
+  namespace: unredacted
+  author: lunarthegrey
   description: An Ansible role to install and configure Pathvector & Bird2 with UniFi support
   company: Unredacted Inc
 
   license: GPL-3.0-only
 
-  min_ansible_version: 2.9
+  min_ansible_version: "2.9"
 
   platforms:
     - name: Debian
@@ -16,9 +19,6 @@ galaxy_info:
       versions:
         - focal     # 20.04
         - jammy     # 22.04
-    - name: UniFi
-      versions:
-        - all       # UniFi systems
 
   galaxy_tags:
     - bgp
