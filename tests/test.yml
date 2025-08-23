@@ -2,5 +2,9 @@
 - name: Test Pathvector role
   hosts: localhost
   remote_user: root
-  roles:
-    - role: ansible-role-pathvector
+  vars:
+    pathvector_debug: true
+  tasks:
+    - name: Include the role
+      ansible.builtin.include_role:
+        name: "{{ playbook_dir | dirname }}"
