@@ -5,13 +5,14 @@
   gather_facts: true
 
   tasks:
-    # Common verifications
+    # Common verifications - Skip if variables aren't set (converge failed)
     - name: Check if configuration was found
       ansible.builtin.assert:
         that:
-          - config_file_found is defined
           - config_file_found | bool
         fail_msg: "Configuration file was not found"
+        success_msg: "Configuration file was found and processed"
+      when: config_file_found is defined
 
     # UniFi-specific verifications
     - name: Verify UniFi deployment

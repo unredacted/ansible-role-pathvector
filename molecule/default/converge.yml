@@ -2,12 +2,25 @@
 - name: Converge
   hosts: all
   become: true
+  vars_files:
+    - ../../defaults/main.yml
+    - ../../vars/main.yml
 
   pre_tasks:
     - name: Create test configuration files
       delegate_to: localhost
       become: false
       block:
+        - name: Ensure molecule ephemeral directory exists
+          ansible.builtin.stat:
+            path: "{{ molecule_ephemeral_directory | default('/tmp/molecule') }}"
+          register: molecule_dir
+          
+        - name: Set playbook_dir fact
+          ansible.builtin.set_fact:
+            playbook_dir: "{{ molecule_ephemeral_directory | default('/tmp/molecule') }}/../.."
+          run_once: true
+        
         - name: Create files directory
           ansible.builtin.file:
             path: "{{ playbook_dir }}/files"
@@ -47,5 +60,10 @@
           loop: "{{ groups['all'] }}"
           run_once: true
 
-  roles:
-    - role: ansible-role-pathvector
+  tasks:
+    - name: Import main tasks
+      ansible.builtin.import_tasks: ../../tasks/main.yml
+
+  handlers:
+    - name: Import handlers
+      ansible.builtin.import_tasks: ../../handlers/main.yml

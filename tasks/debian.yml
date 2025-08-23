@@ -9,6 +9,7 @@
         dest: /usr/share/keyrings/pathvector.asc
         mode: '0644'
       register: repo_key_result
+      when: not (pathvector_skip_install | default(false))
 
     - name: Add Pathvector APT repository
       ansible.builtin.apt_repository:
@@ -16,11 +17,14 @@
         state: present
         filename: pathvector
       register: repo_add_result
+      when: not (pathvector_skip_install | default(false))
 
     - name: Update APT cache after adding repository
       ansible.builtin.apt:
         update_cache: yes
-      when: repo_add_result.changed
+      when: 
+        - repo_add_result.changed | default(false)
+        - not (pathvector_skip_install | default(false))
       tags:
         - skip_ansible_lint
 
