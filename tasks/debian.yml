@@ -32,6 +32,7 @@
         state: present
         update_cache: yes
       register: install_result
+      when: not (pathvector_skip_install | default(false))
 
     - name: Display installation result
       ansible.builtin.debug:
@@ -45,6 +46,7 @@
         enabled: yes
         daemon_reload: yes
       register: bird_service_result
+      when: not (pathvector_skip_install | default(false))
 
     - name: Check Bird service status
       ansible.builtin.systemd:
@@ -52,6 +54,7 @@
         state: started
       register: bird_status
       failed_when: false
+      when: not (pathvector_skip_install | default(false))
 
     - name: Display Bird service status
       ansible.builtin.debug:
@@ -92,6 +95,7 @@
       register: generate_result
       changed_when: generate_result.rc == 0
       notify: reload bird
+      when: not (pathvector_skip_install | default(false))
 
     - name: Display Pathvector generate output
       ansible.builtin.debug:
@@ -105,6 +109,7 @@
       register: bird_validate
       changed_when: false
       failed_when: false
+      when: not (pathvector_skip_install | default(false))
 
     - name: Display Bird validation result
       ansible.builtin.debug:

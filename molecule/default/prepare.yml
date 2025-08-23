@@ -30,6 +30,11 @@
             state: directory
             mode: '0755'
 
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+      
     - name: Install required packages for testing
       ansible.builtin.package:
         name:

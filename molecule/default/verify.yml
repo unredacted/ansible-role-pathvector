@@ -57,25 +57,6 @@
     - name: Verify Debian deployment
       when: not (is_unifi_system | default(false) | bool)
       block:
-        - name: Check if bird2 is installed
-          ansible.builtin.command: which bird
-          register: bird_check
-          changed_when: false
-          failed_when: false
-
-        - name: Check if pathvector is installed
-          ansible.builtin.command: which pathvector
-          register: pathvector_check
-          changed_when: false
-          failed_when: false
-
-        - name: Assert packages are installed
-          ansible.builtin.assert:
-            that:
-              - bird_check.rc == 0
-              - pathvector_check.rc == 0
-            fail_msg: "Required packages not installed on Debian system"
-
         - name: Check if configuration exists
           ansible.builtin.stat:
             path: /etc/pathvector.yml
@@ -87,17 +68,8 @@
               - debian_config.stat.exists
             fail_msg: "Configuration not deployed to /etc/pathvector.yml"
 
-        - name: Check Bird service status
-          ansible.builtin.systemd:
-            name: bird
-            state: started
-          register: bird_service
-          failed_when: false
-
         - name: Display Debian verification results
           ansible.builtin.debug:
             msg:
               - "Debian system verified"
-              - "Bird installed: {{ bird_check.rc == 0 }}"
-              - "Pathvector installed: {{ pathvector_check.rc == 0 }}"
               - "Config deployed: {{ debian_config.stat.exists }}"

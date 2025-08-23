@@ -6,6 +6,7 @@
   pre_tasks:
     - name: Create test configuration files
       delegate_to: localhost
+      become: false
       block:
         - name: Create files directory
           ansible.builtin.file:
@@ -46,7 +47,5 @@
           loop: "{{ groups['all'] }}"
           run_once: true
 
-  tasks:
-    - name: Include pathvector role
-      ansible.builtin.include_role:
-        name: "{{ molecule_ephemeral_directory }}/../../.."
+  roles:
+    - role: ansible-role-pathvector
