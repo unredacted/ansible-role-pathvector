@@ -22,7 +22,7 @@
     - name: Update APT cache after adding repository
       ansible.builtin.apt:
         update_cache: yes
-      when: 
+      when:
         - repo_add_result.changed | default(false)
         - not (pathvector_skip_install | default(false))
       tags:
