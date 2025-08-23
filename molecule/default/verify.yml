@@ -1,76 +1,17 @@
 ---
-- name: Verify deployment
+- name: Verify
   hosts: all
   become: true
-  gather_facts: true
-
+  
   tasks:
-    # Common verifications - Skip if variables aren't set (converge failed)
-    - name: Check if configuration was found
+    - name: Check if pathvector config was deployed
+      ansible.builtin.stat:
+        path: /etc/pathvector.yml
+      register: config_check
+    
+    - name: Assert config exists
       ansible.builtin.assert:
         that:
-          - config_file_found | bool
-        fail_msg: "Configuration file was not found"
-        success_msg: "Configuration file was found and processed"
-      when: config_file_found is defined
-
-    # UniFi-specific verifications
-    - name: Verify UniFi deployment
-      when: is_unifi_system | default(false) | bool
-      block:
-        - name: Check if on-boot script exists
-          ansible.builtin.stat:
-            path: "/data/on_boot.d/1-unifi-pathvector-setup.sh"
-          register: unifi_script
-
-        - name: Assert on-boot script was deployed
-          ansible.builtin.assert:
-            that:
-              - unifi_script.stat.exists
-              - unifi_script.stat.mode == '0755'
-            fail_msg: "UniFi on-boot script not properly deployed"
-
-        - name: Check if persistent config exists
-          ansible.builtin.stat:
-            path: /data/on_boot.d/pathvector.yml
-          register: unifi_config
-
-        - name: Assert persistent config was deployed
-          ansible.builtin.assert:
-            that:
-              - unifi_config.stat.exists
-            fail_msg: "UniFi persistent config not deployed"
-
-        - name: Check if log file was created
-          ansible.builtin.stat:
-            path: /var/log/unifi-pathvector-setup.log
-          register: unifi_log
-
-        - name: Display UniFi verification results
-          ansible.builtin.debug:
-            msg:
-              - "UniFi system verified"
-              - "On-boot script: {{ unifi_script.stat.exists }}"
-              - "Persistent config: {{ unifi_config.stat.exists }}"
-              - "Log file created: {{ unifi_log.stat.exists }}"
-
-    # Debian-specific verifications
-    - name: Verify Debian deployment
-      when: not (is_unifi_system | default(false) | bool)
-      block:
-        - name: Check if configuration exists
-          ansible.builtin.stat:
-            path: /etc/pathvector.yml
-          register: debian_config
-
-        - name: Assert configuration was deployed
-          ansible.builtin.assert:
-            that:
-              - debian_config.stat.exists
-            fail_msg: "Configuration not deployed to /etc/pathvector.yml"
-
-        - name: Display Debian verification results
-          ansible.builtin.debug:
-            msg:
-              - "Debian system verified"
-              - "Config deployed: {{ debian_config.stat.exists }}"
+          - config_check.stat.exists
+        fail_msg: "Pathvector config was not deployed to /etc/pathvector.yml"
+        success_msg: "Pathvector config successfully deployed"

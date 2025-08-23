@@ -1,44 +1,9 @@
 ---
-- name: Prepare test environment
+- name: Prepare
   hosts: all
   become: true
   tasks:
-    - name: Install systemd (if needed)
-      ansible.builtin.package:
-        name: systemd
-        state: present
-      when: ansible_os_family == "Debian"
-
-    - name: Create UniFi-like environment for UniFi simulation hosts
-      when: molecule_unifi_simulation | default(false)
-      block:
-        - name: Create /data directory
-          ansible.builtin.file:
-            path: /data
-            state: directory
-            mode: '0755'
-
-        - name: Create UniFi directory
-          ansible.builtin.file:
-            path: /data/unifi
-            state: directory
-            mode: '0755'
-
-        - name: Create on_boot.d directory
-          ansible.builtin.file:
-            path: /data/on_boot.d
-            state: directory
-            mode: '0755'
-
     - name: Update apt cache
       ansible.builtin.apt:
         update_cache: yes
       when: ansible_os_family == "Debian"
-      
-    - name: Install required packages for testing
-      ansible.builtin.package:
-        name:
-          - curl
-          - gnupg
-          - apt-transport-https
-        state: present
