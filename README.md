@@ -21,7 +21,7 @@ An Ansible role to install and configure [Pathvector](https://pathvector.io/) & 
 ## Installation
 
 ```bash
-ansible-galaxy install git+https://github.com/unredacted/ansible-role-pathvector.git
+ansible-galaxy role install unredacted.pathvector
 ```
 
 ## Quick Start
@@ -32,7 +32,7 @@ ansible-galaxy install git+https://github.com/unredacted/ansible-role-pathvector
 - hosts: routers
   become: yes
   roles:
-    - ansible-role-pathvector
+    - unredacted.pathvector
 ```
 
 The role automatically detects if it's running on a UniFi system or standard Debian/Ubuntu.
@@ -133,7 +133,7 @@ pathvector_repo_component: "main"
 - hosts: unifi_devices
   become: yes
   roles:
-    - ansible-role-pathvector
+    - unredacted.pathvector
   vars:
     pathvector_unifi_run_immediately: true
     pathvector_unifi_autostart_services: true
@@ -144,7 +144,7 @@ pathvector_repo_component: "main"
 - hosts: routers
   become: yes
   roles:
-    - ansible-role-pathvector
+    - unredacted.pathvector
   vars:
     pathvector_run_script: true
     pathvector_script_flags: "--prepends 2,1,0 --ignore router1.yml"
@@ -156,7 +156,7 @@ pathvector_repo_component: "main"
 - hosts: all_routers
   become: yes
   roles:
-    - ansible-role-pathvector
+    - unredacted.pathvector
 ```
 
 ## Troubleshooting
