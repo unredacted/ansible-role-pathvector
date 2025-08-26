@@ -3,6 +3,36 @@
 
 - name: Debian deployment
   block:
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - wget
+        state: present
+        update_cache: yes
+
+    - name: Install Bird from official CZ.NIC repository
+      when: bird_install_from_official | default(true)
+      block:
+        - name: Add CZ.NIC Labs GPG key for Bird
+          ansible.builtin.get_url:
+            url: "{{ bird_gpg_key_url }}"
+            dest: /usr/share/keyrings/cznic-labs-pkg.gpg
+            mode: '0644'
+
+        - name: Add Bird {{ bird_version }} APT repository
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/usr/share/keyrings/cznic-labs-pkg.gpg] https://pkg.labs.nic.cz/{{ bird_version }} {{ ansible_distribution_release }} main"
+            state: present
+            filename: "cznic-labs-{{ bird_version }}"
+          register: bird_repo_result
+
+        - name: Update APT cache after adding Bird repository
+          ansible.builtin.apt:
+            update_cache: yes
+          when: bird_repo_result.changed
+
     - name: Install Pathvector repository key
       ansible.builtin.get_url:
         url: "{{ pathvector_pgp_key_url | default('https://repo.pathvector.io/pgp.asc') }}"
@@ -11,13 +41,13 @@
       register: repo_key_result
       when: not (pathvector_skip_install | default(false))
 
-    - name: Add Pathvector APT repository
-      ansible.builtin.apt_repository:
-        repo: "{{ pathvector_repo }}"
-        state: present
-        filename: pathvector
-      register: repo_add_result
-      when: not (pathvector_skip_install | default(false))
+    # - name: Add Pathvector APT repository
+    #   ansible.builtin.apt_repository:
+    #     repo: "{{ pathvector_repo }}"
+    #     state: present
+    #     filename: pathvector
+    #   register: repo_add_result
+    #   when: not (pathvector_skip_install | default(false))
 
     - name: Update APT cache after adding repository
       ansible.builtin.apt:
@@ -28,10 +58,10 @@
       tags:
         - skip_ansible_lint
 
-    - name: Install Bird2 and Pathvector packages
+    - name: Install Bird and Pathvector packages
       ansible.builtin.apt:
         name:
-          - bird2
+          - "{{ bird_version }}"
           - pathvector
         state: present
         update_cache: yes
@@ -63,6 +93,7 @@
     - name: Display Bird service status
       ansible.builtin.debug:
         msg:
+          - "Bird version: {{ bird_version }}"
           - "Bird service active: {{ bird_status.status.ActiveState | default('unknown') }}"
       when: pathvector_debug | bool
 
@@ -128,7 +159,9 @@
   ansible.builtin.debug:
     msg:
       - "=== Debian Deployment Summary ==="
-      - "Packages installed: {{ 'bird2, pathvector' if install_result.changed else 'Already installed' }}"
+      - "Distribution: {{ ansible_distribution }} {{ ansible_distribution_release }}"
+      - "Bird version: {{ bird_version }}"
+      - "Packages installed: {{ bird_version }}, pathvector"
       - "Configuration deployed: {{ 'Yes' if config_copy_result.changed else 'No changes' }}"
       - "Bird service: {{ bird_status.status.ActiveState | default('unknown') }}"
   when: pathvector_debug | bool

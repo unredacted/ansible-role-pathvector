@@ -1,9 +1,11 @@
 # ansible-role-pathvector
 
-An Ansible role to install and configure [Pathvector](https://pathvector.io/) & Bird2 with automatic UniFi detection and support.
+An Ansible role to install and configure [Pathvector](https://pathvector.io/) & Bird (Bird2 or Bird3) from official CZ.NIC repositories with automatic UniFi detection and support.
 
 ## Features
 
+- Installs Bird2 or Bird3 from official CZ.NIC repositories  
+- Automatic OS detection (Debian/Ubuntu) with proper repository configuration
 - Automatic detection of UniFi vs standard Debian systems
 - Persistent UniFi on-boot scripts that survive firmware updates
 - Standard APT installation for Debian/Ubuntu systems
@@ -13,7 +15,8 @@ An Ansible role to install and configure [Pathvector](https://pathvector.io/) & 
 ## Requirements
 
 - **Supported Systems**:
-  - Debian 11/12, Ubuntu 20.04/22.04
+  - Debian 10 (Buster), 11 (Bullseye), 12 (Bookworm)
+  - Ubuntu 20.04 (Focal), 22.04 (Jammy), 24.04 (Noble)
   - UniFi devices with `/data/on_boot.d/` support
 - **Ansible**: 2.9+
 - **Python**: 3.6+ (with `requests`, `ipaddress`, `ruamel.yaml` for prepend script)
@@ -86,6 +89,13 @@ peers:
 
 ## Role Variables
 
+### Bird Configuration
+```yaml
+bird_version: "bird2"                          # Choose "bird2" or "bird3"
+bird_install_from_official: true               # Install from CZ.NIC official repos
+bird_gpg_key_url: "https://pkg.labs.nic.cz/gpg"  # CZ.NIC GPG key URL
+```
+
 ### Common Variables
 ```yaml
 pathvector_config_path: "/etc/pathvector.yml"  # Config destination
@@ -109,6 +119,12 @@ pathvector_repo_dist: "stable"
 pathvector_repo_component: "main"
 ```
 
+## Repository Sources
+
+- **Bird**: Official CZ.NIC Labs packages from https://pkg.labs.nic.cz/
+  - GPG Key fingerprint: `9C71 D59C D4CE 8BD2 966A 7A3E AB6A 3031 2401 9B64`
+- **Pathvector**: Official packages from https://repo.pathvector.io/
+
 ## How It Works
 
 ### For UniFi Systems
@@ -121,12 +137,33 @@ pathvector_repo_component: "main"
    - Logs to `/var/log/unifi-pathvector-setup.log`
 
 ### For Debian/Ubuntu Systems
-1. Adds Pathvector repository
-2. Installs bird2 and pathvector packages
-3. Deploys configuration to `/etc/pathvector.yml`
-4. Starts and enables bird service
+1. Adds CZ.NIC official Bird repository (configures based on OS release)
+2. Adds Pathvector repository
+3. Installs chosen Bird version (bird2 or bird3) and pathvector packages
+4. Deploys configuration to `/etc/pathvector.yml`
+5. Starts and enables bird service
 
 ## Advanced Usage
+
+### Install Bird3 instead of Bird2
+```yaml
+- hosts: routers
+  become: yes
+  roles:
+    - unredacted.pathvector
+  vars:
+    bird_version: "bird3"
+```
+
+### Use Distribution's Bird Package
+```yaml
+- hosts: routers
+  become: yes
+  roles:
+    - unredacted.pathvector
+  vars:
+    bird_install_from_official: false  # Will use distro's bird2 package
+```
 
 ### Run Installation Immediately on UniFi
 ```yaml

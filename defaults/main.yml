@@ -1,6 +1,11 @@
 ---
 # defaults file for ansible-role-pathvector
 
+# Bird configuration
+bird_version: "bird2"  # Options: "bird2" or "bird3"
+bird_install_from_official: true  # Install from CZ.NIC official repos instead of distro repos
+bird_gpg_key_url: "https://pkg.labs.nic.cz/gpg"
+
 # Repository configuration
 pathvector_repo: "deb [signed-by=/usr/share/keyrings/pathvector.asc] https://repo.pathvector.io/apt/ stable main"
 pathvector_pgp_key_url: "https://repo.pathvector.io/pgp.asc"

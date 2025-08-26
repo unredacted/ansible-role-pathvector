@@ -9,6 +9,8 @@
         msg:
           - "=== UniFi System Detected ==="
           - "Deploying on-boot script for persistent installation"
+          - "Bird version: {{ bird_version | default('bird2') }}"
+          - "Install from official repos: {{ bird_install_from_official | default(true) }}"
           - "Script name: {{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
       when: pathvector_debug | bool
 
@@ -116,7 +118,7 @@
         path: /data/on_boot.d/pathvector.yml
       register: config_stat
 
-    - name: Check if bird2 is installed (if script was run)
+    - name: Check if bird is installed (if script was run)
       ansible.builtin.command: which bird
       register: bird_installed
       changed_when: false
@@ -134,7 +136,7 @@
           - "=== UniFi Deployment Summary ==="
           - "On-boot script: {{ 'Deployed' if script_stat.stat.exists else 'Not found' }}"
           - "Persistent config: {{ 'Deployed' if config_stat.stat.exists else 'Not found' }}"
-          - "Bird2 installed: {{ 'Yes' if bird_installed.rc == 0 else 'No' }}"
+          - "{{ bird_version | default('bird2') }} installed: {{ 'Yes' if bird_installed.rc == 0 else 'No' }}"
           - "Pathvector installed: {{ 'Yes' if pathvector_installed.rc == 0 else 'No' }}"
           - "Script will run automatically on next boot"
 
