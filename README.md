@@ -15,8 +15,8 @@ An Ansible role to install and configure [Pathvector](https://pathvector.io/) & 
 ## Requirements
 
 - **Supported Systems**:
-  - Debian 10 (Buster), 11 (Bullseye), 12 (Bookworm)
-  - Ubuntu 20.04 (Focal), 22.04 (Jammy), 24.04 (Noble)
+  - Debian 11 (Bullseye), 12 (Bookworm)
+  - Ubuntu 22.04 (Jammy), 24.04 (Noble)
   - UniFi devices with `/data/on_boot.d/` support
 - **Ansible**: 2.9+
 - **Python**: 3.6+ (with `requests`, `ipaddress`, `ruamel.yaml` for prepend script)

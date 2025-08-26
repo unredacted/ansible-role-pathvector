@@ -21,17 +21,12 @@
             dest: /usr/share/keyrings/cznic-labs-pkg.gpg
             mode: '0644'
 
-        - name: Add Bird {{ bird_version }} APT repository
+        - name: Add Bird APT repository
           ansible.builtin.apt_repository:
             repo: "deb [signed-by=/usr/share/keyrings/cznic-labs-pkg.gpg] https://pkg.labs.nic.cz/{{ bird_version }} {{ ansible_distribution_release }} main"
             state: present
             filename: "cznic-labs-{{ bird_version }}"
-          register: bird_repo_result
-
-        - name: Update APT cache after adding Bird repository
-          ansible.builtin.apt:
             update_cache: yes
-          when: bird_repo_result.changed
 
     - name: Install Pathvector repository key
       ansible.builtin.get_url:
@@ -41,22 +36,13 @@
       register: repo_key_result
       when: not (pathvector_skip_install | default(false))
 
-    # - name: Add Pathvector APT repository
-    #   ansible.builtin.apt_repository:
-    #     repo: "{{ pathvector_repo }}"
-    #     state: present
-    #     filename: pathvector
-    #   register: repo_add_result
-    #   when: not (pathvector_skip_install | default(false))
-
-    - name: Update APT cache after adding repository
-      ansible.builtin.apt:
+    - name: Add Pathvector APT repository
+      ansible.builtin.apt_repository:
+        repo: "{{ pathvector_repo }}"
+        state: present
+        filename: pathvector
         update_cache: yes
-      when:
-        - repo_add_result.changed | default(false)
-        - not (pathvector_skip_install | default(false))
-      tags:
-        - skip_ansible_lint
+      when: not (pathvector_skip_install | default(false))
 
     - name: Install Bird and Pathvector packages
       ansible.builtin.apt:
