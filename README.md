@@ -17,7 +17,7 @@ An Ansible role to install and configure [Pathvector](https://pathvector.io/) & 
 - **Supported Systems**:
   - Debian 11 (Bullseye), 12 (Bookworm)
   - Ubuntu 22.04 (Jammy), 24.04 (Noble)
-  - UniFi devices with `/data/on_boot.d/` support
+  - UniFi devices with 4.x firmware and `/data/on_boot.d/` support installed via [unifios-utilities](https://github.com/unifi-utilities/unifios-utilities/tree/main/on-boot-script-2.x)
 - **Ansible**: 2.9+
 - **Python**: 3.6+ (with `requests`, `ipaddress`, `ruamel.yaml` for prepend script)
 
