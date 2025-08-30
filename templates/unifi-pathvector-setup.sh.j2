@@ -20,6 +20,28 @@ SCRIPT_NAME="unifi-pathvector-setup"
 LOG_FILE="/var/log/${SCRIPT_NAME}.log"
 CONFIG_SOURCE="/data/on_boot.d/pathvector.yml"
 CONFIG_DEST="{{ pathvector_config_path | default('/etc/pathvector.yml') }}"
+FORCE_MODE=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --force)
+            FORCE_MODE=true
+            shift
+            ;;
+        --help)
+            echo "Usage: $0 [--force]"
+            echo "  --force  Force update of bird and pathvector to latest versions"
+            echo "           and re-add package repositories"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information"
+            exit 1
+            ;;
+    esac
+done
 
 # Function to log messages
 log_message() {
@@ -59,16 +81,23 @@ setup_pathvector_config() {
 # Main Script Start
 log_message "Starting $SCRIPT_NAME"
 log_message "Bird version: $BIRD_VERSION, Install from official: $BIRD_INSTALL_FROM_OFFICIAL"
+if [ "$FORCE_MODE" = "true" ]; then
+    log_message "Running in FORCE mode - will update packages and re-add repositories"
+fi
 
-# Check if packages are already installed
-if command -v pathvector >/dev/null 2>&1 && command -v bird >/dev/null 2>&1; then
-    log_message "$BIRD_VERSION and pathvector are already installed"
+# Check if packages are already installed (skip in force mode)
+if [ "$FORCE_MODE" != "true" ]; then
+    if command -v pathvector >/dev/null 2>&1 && command -v bird >/dev/null 2>&1; then
+        log_message "$BIRD_VERSION and pathvector are already installed"
 
-    # Even if installed, setup configuration if it exists
-    setup_pathvector_config
+        # Even if installed, setup configuration if it exists
+        setup_pathvector_config
 
-    log_message "$SCRIPT_NAME completed (packages already installed)"
-    exit 0
+        log_message "$SCRIPT_NAME completed (packages already installed)"
+        exit 0
+    fi
+else
+    log_message "Force mode enabled - proceeding with repository and package updates"
 fi
 
 log_message "Installing $BIRD_VERSION and pathvector..."
@@ -84,8 +113,8 @@ log_message "Detected distribution codename: $DISTRO_CODENAME"
 
 # Setup Bird repository if using official repos
 if [ "$BIRD_INSTALL_FROM_OFFICIAL" = "true" ]; then
-    # Add CZ.NIC Bird repository key
-    if ! [ -f /usr/share/keyrings/cznic-labs-pkg.gpg ]; then
+    # Add CZ.NIC Bird repository key (force re-add in force mode)
+    if [ "$FORCE_MODE" = "true" ] || ! [ -f /usr/share/keyrings/cznic-labs-pkg.gpg ]; then
         log_message "Adding CZ.NIC Bird repository key from $BIRD_GPG_KEY_URL..."
         if wget -q -O /usr/share/keyrings/cznic-labs-pkg.gpg "$BIRD_GPG_KEY_URL"; then
             log_message "CZ.NIC repository key added successfully"
@@ -97,9 +126,9 @@ if [ "$BIRD_INSTALL_FROM_OFFICIAL" = "true" ]; then
         log_message "CZ.NIC repository key already exists"
     fi
 
-    # Add Bird repository
+    # Add Bird repository (force re-add in force mode)
     BIRD_REPO_FILE="/etc/apt/sources.list.d/cznic-labs-${BIRD_VERSION}.list"
-    if ! [ -f "$BIRD_REPO_FILE" ]; then
+    if [ "$FORCE_MODE" = "true" ] || ! [ -f "$BIRD_REPO_FILE" ]; then
         log_message "Adding $BIRD_VERSION repository..."
         echo "deb [signed-by=/usr/share/keyrings/cznic-labs-pkg.gpg] https://pkg.labs.nic.cz/${BIRD_VERSION} ${DISTRO_CODENAME} main" > "$BIRD_REPO_FILE"
         log_message "Bird repository added: https://pkg.labs.nic.cz/${BIRD_VERSION} ${DISTRO_CODENAME} main"
@@ -108,8 +137,8 @@ if [ "$BIRD_INSTALL_FROM_OFFICIAL" = "true" ]; then
     fi
 fi
 
-# Add pathvector repository key
-if ! [ -f /usr/share/keyrings/pathvector.asc ]; then
+# Add pathvector repository key (force re-add in force mode)
+if [ "$FORCE_MODE" = "true" ] || ! [ -f /usr/share/keyrings/pathvector.asc ]; then
     log_message "Adding pathvector repository key from $PGP_KEY_URL..."
     if curl -fsSL "$PGP_KEY_URL" > /usr/share/keyrings/pathvector.asc; then
         log_message "Repository key added successfully"
@@ -121,8 +150,8 @@ else
     log_message "Repository key already exists"
 fi
 
-# Add pathvector repository
-if ! [ -f /etc/apt/sources.list.d/pathvector.list ]; then
+# Add pathvector repository (force re-add in force mode)
+if [ "$FORCE_MODE" = "true" ] || ! [ -f /etc/apt/sources.list.d/pathvector.list ]; then
     log_message "Adding pathvector repository..."
     echo "deb [signed-by=/usr/share/keyrings/pathvector.asc] $REPO_URL $REPO_DIST $REPO_COMPONENT" > /etc/apt/sources.list.d/pathvector.list
     log_message "Repository added: $REPO_URL $REPO_DIST $REPO_COMPONENT"
@@ -138,33 +167,48 @@ else
     log_message "WARNING: Failed to update package list completely"
 fi
 
-# Install packages
-log_message "Installing pathvector and $BIRD_VERSION..."
-if DEBIAN_FRONTEND=noninteractive apt install -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
-    log_message "Installation completed successfully"
-
-    # Verify installation
-    if command -v pathvector >/dev/null 2>&1; then
-        PATHVECTOR_VERSION=$(pathvector version 2>/dev/null || echo "unknown")
-        log_message "pathvector installed: version $PATHVECTOR_VERSION"
+# Install or update packages
+if [ "$FORCE_MODE" = "true" ]; then
+    log_message "Force updating pathvector and $BIRD_VERSION to latest versions..."
+    # Update packages to latest version in force mode
+    if DEBIAN_FRONTEND=noninteractive apt install --only-upgrade -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
+        log_message "Packages updated successfully"
     else
-        log_message "WARNING: pathvector command not found after installation"
+        log_message "No updates available or packages not installed yet, performing fresh install..."
+        if DEBIAN_FRONTEND=noninteractive apt install -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
+            log_message "Installation completed successfully"
+        else
+            log_message "ERROR: Failed to install/update packages"
+            exit 1
+        fi
     fi
-
-    if command -v bird >/dev/null 2>&1; then
-        BIRD_VERSION_INFO=$(bird --version 2>&1 | head -n1 || echo "unknown")
-        log_message "$BIRD_VERSION installed: $BIRD_VERSION_INFO"
-    else
-        log_message "WARNING: bird command not found after installation"
-    fi
-
-    # Setup pathvector configuration after successful installation
-    setup_pathvector_config
-
 else
-    log_message "ERROR: Failed to install packages"
-    exit 1
+    log_message "Installing pathvector and $BIRD_VERSION..."
+    if DEBIAN_FRONTEND=noninteractive apt install -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
+        log_message "Installation completed successfully"
+    else
+        log_message "ERROR: Failed to install packages"
+        exit 1
+    fi
 fi
+
+# Verify installation
+if command -v pathvector >/dev/null 2>&1; then
+    PATHVECTOR_VERSION=$(pathvector version 2>/dev/null || echo "unknown")
+    log_message "pathvector installed: version $PATHVECTOR_VERSION"
+else
+    log_message "WARNING: pathvector command not found after installation"
+fi
+
+if command -v bird >/dev/null 2>&1; then
+    BIRD_VERSION_INFO=$(bird --version 2>&1 | head -n1 || echo "unknown")
+    log_message "$BIRD_VERSION installed: $BIRD_VERSION_INFO"
+else
+    log_message "WARNING: bird command not found after installation"
+fi
+
+# Setup pathvector configuration after successful installation
+setup_pathvector_config
 
 {% if pathvector_unifi_autostart_services | default(false) %}
 # Start/restart services
