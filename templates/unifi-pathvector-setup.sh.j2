@@ -48,6 +48,42 @@ log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
+# Determine the correct bird service unit name
+detect_bird_unit() {
+    # Try common unit names in order
+    for unit in bird.service bird2.service bird3.service; do
+        if systemctl list-unit-files --type=service 2>/dev/null | awk '{print $1}' | grep -qx "$unit"; then
+            echo "$unit"
+            return 0
+        fi
+    done
+    # Fallback: if bird is installed but unit scan failed, try 'bird.service'
+    echo "bird.service"
+}
+
+# Ensure a service is enabled and started (with a network-online dependency for Bird)
+ensure_enabled_and_started() {
+    local svc="$1"
+
+    # Add a drop-in so the service waits for the network to be online (useful for routing daemons)
+    local dropin_dir="/etc/systemd/system/${svc}.d"
+    mkdir -p "$dropin_dir"
+    cat > "${dropin_dir}/override.conf" <<'EOF'
+[Unit]
+Wants=network-online.target
+After=network-online.target
+EOF
+
+    # Reload, enable on boot, and start (or restart if already running)
+    systemctl daemon-reload
+    systemctl enable --now "$svc" 2>/dev/null || systemctl enable "$svc" 2>/dev/null
+    if systemctl is-active --quiet "$svc"; then
+        systemctl restart "$svc"
+    else
+        systemctl start "$svc" || true
+    fi
+}
+
 # Function to setup pathvector configuration
 setup_pathvector_config() {
     log_message "Setting up pathvector configuration..."
@@ -85,13 +121,18 @@ if [ "$FORCE_MODE" = "true" ]; then
     log_message "Running in FORCE mode - will update packages and re-add repositories"
 fi
 
-# Check if packages are already installed (skip in force mode)
+# If already installed (and not forcing), still ensure services are enabled/started and config is applied
 if [ "$FORCE_MODE" != "true" ]; then
     if command -v pathvector >/dev/null 2>&1 && command -v bird >/dev/null 2>&1; then
         log_message "$BIRD_VERSION and pathvector are already installed"
 
-        # Even if installed, setup configuration if it exists
+        # Apply config if present
         setup_pathvector_config
+
+        # Ensure services are enabled and started now and on future boots
+        BIRD_UNIT="$(detect_bird_unit)"
+        log_message "Ensuring Bird service is enabled and started (unit: $BIRD_UNIT)..."
+        ensure_enabled_and_started "$BIRD_UNIT"
 
         log_message "$SCRIPT_NAME completed (packages already installed)"
         exit 0
@@ -105,7 +146,7 @@ log_message "Installing $BIRD_VERSION and pathvector..."
 # Install prerequisite packages
 log_message "Installing prerequisite packages..."
 DEBIAN_FRONTEND=noninteractive apt update >/dev/null 2>&1
-DEBIAN_FRONTEND=noninteractive apt install -y apt-transport-https ca-certificates wget lsb-release >/dev/null 2>&1
+DEBIAN_FRONTEND=noninteractive apt install -y apt-transport-https ca-certificates wget lsb-release curl >/dev/null 2>&1
 
 # Get distribution codename
 DISTRO_CODENAME=$(lsb_release -cs 2>/dev/null || echo "bullseye")
@@ -170,7 +211,6 @@ fi
 # Install or update packages
 if [ "$FORCE_MODE" = "true" ]; then
     log_message "Force updating pathvector and $BIRD_VERSION to latest versions..."
-    # Update packages to latest version in force mode
     if DEBIAN_FRONTEND=noninteractive apt install --only-upgrade -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
         log_message "Packages updated successfully"
     else
@@ -210,20 +250,10 @@ fi
 # Setup pathvector configuration after successful installation
 setup_pathvector_config
 
-{% if pathvector_unifi_autostart_services | default(false) %}
-# Start/restart services
-log_message "Starting bird service..."
-systemctl restart bird
-log_message "Starting pathvector service..."
-systemctl restart pathvector
-{% else %}
-# Optional: Start/restart services if needed
-# Uncomment the following lines if you want to start the services automatically
-# log_message "Starting bird service..."
-# systemctl restart bird
-# log_message "Starting pathvector service..."
-# systemctl restart pathvector
-{% endif %}
+# Enable + (re)start services so they come up now and on future boots
+BIRD_UNIT="$(detect_bird_unit)"
+log_message "Enabling and starting Bird service (unit: $BIRD_UNIT)..."
+ensure_enabled_and_started "$BIRD_UNIT"
 
 log_message "$SCRIPT_NAME completed successfully"
 exit 0

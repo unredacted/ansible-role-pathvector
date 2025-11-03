@@ -25,4 +25,4 @@ pathvector_deploy_unifi_script: true              # Deploy the on-boot script to
 pathvector_unifi_script_name: "1-unifi-pathvector-setup.sh"  # Name of the script in /data/on_boot.d/
 pathvector_unifi_only: false                      # If true, skip standard installation on UniFi systems
 pathvector_unifi_run_immediately: false           # Run the UniFi script immediately after deployment
-pathvector_unifi_autostart_services: false        # Auto-start bird and pathvector services in UniFi script
+pathvector_unifi_autostart_services: false        # Auto-start bird service in UniFi script

@@ -108,7 +108,7 @@ pathvector_script_flags: ""                    # Prepend script flags
 ```yaml
 pathvector_unifi_script_name: "1-unifi-pathvector-setup.sh"  # On-boot script name
 pathvector_unifi_run_immediately: false                      # Install immediately
-pathvector_unifi_autostart_services: false                   # Auto-start services
+pathvector_unifi_autostart_services: false                   # Auto-start bird service
 ```
 
 ### Repository Configuration
