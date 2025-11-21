@@ -20,19 +20,43 @@ SCRIPT_NAME="unifi-pathvector-setup"
 LOG_FILE="/var/log/${SCRIPT_NAME}.log"
 CONFIG_SOURCE="/data/on_boot.d/pathvector.yml"
 CONFIG_DEST="{{ pathvector_config_path | default('/etc/pathvector.yml') }}"
+UDM_BOOT_VERSION="{{ udm_boot_version | default('1.0.2') }}"
+UDM_BOOT_URL="https://github.com/unifi-utilities/unifios-utilities/raw/main/on-boot-script-2.x/packages/udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
+MODE="install"
 FORCE_MODE=false
+SKIP_SHADOW=false
 
+# Parse command line arguments
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --install)
+            MODE="install"
+            shift
+            ;;
+        --check)
+            MODE="check"
+            shift
+            ;;
+        --cron)
+            MODE="cron"
+            shift
+            ;;
+        --skip-shadow)
+            SKIP_SHADOW=true
+            shift
+            ;;
         --force)
             FORCE_MODE=true
             shift
             ;;
         --help)
-            echo "Usage: $0 [--force]"
-            echo "  --force  Force update of bird and pathvector to latest versions"
-            echo "           and re-add package repositories"
+            echo "Usage: $0 [--install|--check|--cron] [--force]"
+            echo "  --install  Install/Update packages and config (default)"
+            echo "  --check    Check status of services"
+            echo "  --cron     Run in cron mode (ensure services running, auto-start)"
+            echo "  --force    Force update/re-install"
+            echo "  --skip-shadow Skip shadow gateway checks (internal use)"
             exit 0
             ;;
         *)
@@ -114,146 +138,224 @@ setup_pathvector_config() {
     fi
 }
 
+# Function to handle shadow gateway
+handle_shadow_gateway() {
+    local shadow_ip="169.254.254.3"
+    local shadow_user="root" # Assuming root access is available/keyed
+
+    if [ "$SKIP_SHADOW" = "true" ]; then
+        return 0
+    fi
+
+    if ping -c 1 -W 1 "$shadow_ip" >/dev/null 2>&1; then
+        log_message "Shadow gateway detected at $shadow_ip"
+        
+        # Copy script and config to shadow
+        log_message "Copying script and config to shadow gateway..."
+        scp "$0" "${shadow_user}@${shadow_ip}:${0}"
+        scp "$CONFIG_SOURCE" "${shadow_user}@${shadow_ip}:${CONFIG_SOURCE}"
+        
+        # Run setup on shadow
+        log_message "Running setup on shadow gateway..."
+        ssh "${shadow_user}@${shadow_ip}" "bash -s" <<EOF
+            # Check for on_boot.d support
+            if [ ! -d "/data/on_boot.d" ]; then
+                echo "Installing udm-boot on shadow gateway..."
+                curl -L "${UDM_BOOT_URL}" -o "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
+                dpkg -i "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
+                systemctl daemon-reload
+                systemctl enable udm-boot
+                rm "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
+            fi
+            
+            # Run the script
+            chmod +x "$0"
+            "$0" --${MODE} --skip-shadow $( [ "$FORCE_MODE" = "true" ] && echo "--force" )
+EOF
+    fi
+}
+
+# Function to run cron checks
+run_cron_checks() {
+    log_message "Running cron checks..."
+    
+    # Check if services are running
+    local bird_unit
+    bird_unit="$(detect_bird_unit)"
+    
+    if ! systemctl is-active --quiet "$bird_unit"; then
+        log_message "Bird service ($bird_unit) is not running. Restarting..."
+        systemctl restart "$bird_unit"
+    fi
+    
+    if ! systemctl is-enabled --quiet "$bird_unit"; then
+        log_message "Bird service ($bird_unit) is not enabled. Enabling..."
+        systemctl enable "$bird_unit"
+    fi
+}
+
 # Main Script Start
-log_message "Starting $SCRIPT_NAME"
-log_message "Bird version: $BIRD_VERSION, Install from official: $BIRD_INSTALL_FROM_OFFICIAL"
-if [ "$FORCE_MODE" = "true" ]; then
-    log_message "Running in FORCE mode - will update packages and re-add repositories"
-fi
+log_message "Starting $SCRIPT_NAME in $MODE mode"
 
-# If already installed (and not forcing), still ensure services are enabled/started and config is applied
-if [ "$FORCE_MODE" != "true" ]; then
-    if command -v pathvector >/dev/null 2>&1 && command -v bird >/dev/null 2>&1; then
-        log_message "$BIRD_VERSION and pathvector are already installed"
+# Handle Shadow Gateway first
+handle_shadow_gateway
 
-        # Apply config if present
+case $MODE in
+    cron)
+        run_cron_checks
+        ;;
+        
+    check)
+        BIRD_UNIT="$(detect_bird_unit)"
+        systemctl status "$BIRD_UNIT" --no-pager
+        pathvector version
+        bird --version
+        log_message "Running pathvector generate..."
+        pathvector generate
+        ;;
+        
+    install)
+        log_message "Bird version: $BIRD_VERSION, Install from official: $BIRD_INSTALL_FROM_OFFICIAL"
+        if [ "$FORCE_MODE" = "true" ]; then
+            log_message "Running in FORCE mode - will update packages and re-add repositories"
+        fi
+
+        # If already installed (and not forcing), still ensure services are enabled/started and config is applied
+        if [ "$FORCE_MODE" != "true" ] && command -v pathvector >/dev/null 2>&1 && command -v bird >/dev/null 2>&1; then
+            log_message "$BIRD_VERSION and pathvector are already installed"
+
+            # Apply config if present
+            setup_pathvector_config
+
+            # Ensure services are enabled and started now and on future boots
+            BIRD_UNIT="$(detect_bird_unit)"
+            log_message "Ensuring Bird service is enabled and started (unit: $BIRD_UNIT)..."
+            ensure_enabled_and_started "$BIRD_UNIT"
+
+            log_message "$SCRIPT_NAME completed (packages already installed)"
+            exit 0
+        fi
+
+        # Force mode or not installed: proceed with installation
+        if [ "$FORCE_MODE" = "true" ]; then
+             log_message "Force mode enabled - proceeding with repository and package updates"
+        fi
+        
+        log_message "Installing $BIRD_VERSION and pathvector..."
+
+        # Install prerequisite packages
+        log_message "Installing prerequisite packages..."
+        DEBIAN_FRONTEND=noninteractive apt update >/dev/null 2>&1
+        DEBIAN_FRONTEND=noninteractive apt install -y apt-transport-https ca-certificates wget lsb-release curl >/dev/null 2>&1
+
+        # Get distribution codename
+        DISTRO_CODENAME=$(lsb_release -cs 2>/dev/null || echo "bullseye")
+        log_message "Detected distribution codename: $DISTRO_CODENAME"
+
+        # Setup Bird repository if using official repos
+        if [ "$BIRD_INSTALL_FROM_OFFICIAL" = "true" ]; then
+            # Add CZ.NIC Bird repository key (force re-add in force mode)
+            if [ "$FORCE_MODE" = "true" ] || ! [ -f /usr/share/keyrings/cznic-labs-pkg.gpg ]; then
+                log_message "Adding CZ.NIC Bird repository key from $BIRD_GPG_KEY_URL..."
+                if wget -q -O /usr/share/keyrings/cznic-labs-pkg.gpg "$BIRD_GPG_KEY_URL"; then
+                    log_message "CZ.NIC repository key added successfully"
+                else
+                    log_message "ERROR: Failed to download CZ.NIC repository key from $BIRD_GPG_KEY_URL"
+                    exit 1
+                fi
+            else
+                log_message "CZ.NIC repository key already exists"
+            fi
+
+            # Add Bird repository (force re-add in force mode)
+            BIRD_REPO_FILE="/etc/apt/sources.list.d/cznic-labs-${BIRD_VERSION}.list"
+            if [ "$FORCE_MODE" = "true" ] || ! [ -f "$BIRD_REPO_FILE" ]; then
+                log_message "Adding $BIRD_VERSION repository..."
+                echo "deb [signed-by=/usr/share/keyrings/cznic-labs-pkg.gpg] https://pkg.labs.nic.cz/${BIRD_VERSION} ${DISTRO_CODENAME} main" > "$BIRD_REPO_FILE"
+                log_message "Bird repository added: https://pkg.labs.nic.cz/${BIRD_VERSION} ${DISTRO_CODENAME} main"
+            else
+                log_message "Bird repository already configured"
+            fi
+        fi
+
+        # Add pathvector repository key (force re-add in force mode)
+        if [ "$FORCE_MODE" = "true" ] || ! [ -f /usr/share/keyrings/pathvector.asc ]; then
+            log_message "Adding pathvector repository key from $PGP_KEY_URL..."
+            if curl -fsSL "$PGP_KEY_URL" > /usr/share/keyrings/pathvector.asc; then
+                log_message "Repository key added successfully"
+            else
+                log_message "ERROR: Failed to download repository key from $PGP_KEY_URL"
+                exit 1
+            fi
+        else
+            log_message "Repository key already exists"
+        fi
+
+        # Add pathvector repository (force re-add in force mode)
+        if [ "$FORCE_MODE" = "true" ] || ! [ -f /etc/apt/sources.list.d/pathvector.list ]; then
+            log_message "Adding pathvector repository..."
+            echo "deb [signed-by=/usr/share/keyrings/pathvector.asc] $REPO_URL $REPO_DIST $REPO_COMPONENT" > /etc/apt/sources.list.d/pathvector.list
+            log_message "Repository added: $REPO_URL $REPO_DIST $REPO_COMPONENT"
+        else
+            log_message "Repository already configured"
+        fi
+
+        # Update package list
+        log_message "Updating package list..."
+        if apt update >/dev/null 2>&1; then
+            log_message "Package list updated successfully"
+        else
+            log_message "WARNING: Failed to update package list completely"
+        fi
+
+        # Install or update packages
+        if [ "$FORCE_MODE" = "true" ]; then
+            log_message "Force updating pathvector and $BIRD_VERSION to latest versions..."
+            if DEBIAN_FRONTEND=noninteractive apt install --only-upgrade -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
+                log_message "Packages updated successfully"
+            else
+                log_message "No updates available or packages not installed yet, performing fresh install..."
+                if DEBIAN_FRONTEND=noninteractive apt install -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
+                    log_message "Installation completed successfully"
+                else
+                    log_message "ERROR: Failed to install/update packages"
+                    exit 1
+                fi
+            fi
+        else
+            log_message "Installing pathvector and $BIRD_VERSION..."
+            if DEBIAN_FRONTEND=noninteractive apt install -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
+                log_message "Installation completed successfully"
+            else
+                log_message "ERROR: Failed to install packages"
+                exit 1
+            fi
+        fi
+
+        # Verify installation
+        if command -v pathvector >/dev/null 2>&1; then
+            PATHVECTOR_VERSION=$(pathvector version 2>/dev/null || echo "unknown")
+            log_message "pathvector installed: version $PATHVECTOR_VERSION"
+        else
+            log_message "WARNING: pathvector command not found after installation"
+        fi
+
+        if command -v bird >/dev/null 2>&1; then
+            BIRD_VERSION_INFO=$(bird --version 2>&1 | head -n1 || echo "unknown")
+            log_message "$BIRD_VERSION installed: $BIRD_VERSION_INFO"
+        else
+            log_message "WARNING: bird command not found after installation"
+        fi
+
+        # Setup pathvector configuration after successful installation
         setup_pathvector_config
 
-        # Ensure services are enabled and started now and on future boots
+        # Enable + (re)start services so they come up now and on future boots
         BIRD_UNIT="$(detect_bird_unit)"
-        log_message "Ensuring Bird service is enabled and started (unit: $BIRD_UNIT)..."
+        log_message "Enabling and starting Bird service (unit: $BIRD_UNIT)..."
         ensure_enabled_and_started "$BIRD_UNIT"
-
-        log_message "$SCRIPT_NAME completed (packages already installed)"
-        exit 0
-    fi
-else
-    log_message "Force mode enabled - proceeding with repository and package updates"
-fi
-
-log_message "Installing $BIRD_VERSION and pathvector..."
-
-# Install prerequisite packages
-log_message "Installing prerequisite packages..."
-DEBIAN_FRONTEND=noninteractive apt update >/dev/null 2>&1
-DEBIAN_FRONTEND=noninteractive apt install -y apt-transport-https ca-certificates wget lsb-release curl >/dev/null 2>&1
-
-# Get distribution codename
-DISTRO_CODENAME=$(lsb_release -cs 2>/dev/null || echo "bullseye")
-log_message "Detected distribution codename: $DISTRO_CODENAME"
-
-# Setup Bird repository if using official repos
-if [ "$BIRD_INSTALL_FROM_OFFICIAL" = "true" ]; then
-    # Add CZ.NIC Bird repository key (force re-add in force mode)
-    if [ "$FORCE_MODE" = "true" ] || ! [ -f /usr/share/keyrings/cznic-labs-pkg.gpg ]; then
-        log_message "Adding CZ.NIC Bird repository key from $BIRD_GPG_KEY_URL..."
-        if wget -q -O /usr/share/keyrings/cznic-labs-pkg.gpg "$BIRD_GPG_KEY_URL"; then
-            log_message "CZ.NIC repository key added successfully"
-        else
-            log_message "ERROR: Failed to download CZ.NIC repository key from $BIRD_GPG_KEY_URL"
-            exit 1
-        fi
-    else
-        log_message "CZ.NIC repository key already exists"
-    fi
-
-    # Add Bird repository (force re-add in force mode)
-    BIRD_REPO_FILE="/etc/apt/sources.list.d/cznic-labs-${BIRD_VERSION}.list"
-    if [ "$FORCE_MODE" = "true" ] || ! [ -f "$BIRD_REPO_FILE" ]; then
-        log_message "Adding $BIRD_VERSION repository..."
-        echo "deb [signed-by=/usr/share/keyrings/cznic-labs-pkg.gpg] https://pkg.labs.nic.cz/${BIRD_VERSION} ${DISTRO_CODENAME} main" > "$BIRD_REPO_FILE"
-        log_message "Bird repository added: https://pkg.labs.nic.cz/${BIRD_VERSION} ${DISTRO_CODENAME} main"
-    else
-        log_message "Bird repository already configured"
-    fi
-fi
-
-# Add pathvector repository key (force re-add in force mode)
-if [ "$FORCE_MODE" = "true" ] || ! [ -f /usr/share/keyrings/pathvector.asc ]; then
-    log_message "Adding pathvector repository key from $PGP_KEY_URL..."
-    if curl -fsSL "$PGP_KEY_URL" > /usr/share/keyrings/pathvector.asc; then
-        log_message "Repository key added successfully"
-    else
-        log_message "ERROR: Failed to download repository key from $PGP_KEY_URL"
-        exit 1
-    fi
-else
-    log_message "Repository key already exists"
-fi
-
-# Add pathvector repository (force re-add in force mode)
-if [ "$FORCE_MODE" = "true" ] || ! [ -f /etc/apt/sources.list.d/pathvector.list ]; then
-    log_message "Adding pathvector repository..."
-    echo "deb [signed-by=/usr/share/keyrings/pathvector.asc] $REPO_URL $REPO_DIST $REPO_COMPONENT" > /etc/apt/sources.list.d/pathvector.list
-    log_message "Repository added: $REPO_URL $REPO_DIST $REPO_COMPONENT"
-else
-    log_message "Repository already configured"
-fi
-
-# Update package list
-log_message "Updating package list..."
-if apt update >/dev/null 2>&1; then
-    log_message "Package list updated successfully"
-else
-    log_message "WARNING: Failed to update package list completely"
-fi
-
-# Install or update packages
-if [ "$FORCE_MODE" = "true" ]; then
-    log_message "Force updating pathvector and $BIRD_VERSION to latest versions..."
-    if DEBIAN_FRONTEND=noninteractive apt install --only-upgrade -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
-        log_message "Packages updated successfully"
-    else
-        log_message "No updates available or packages not installed yet, performing fresh install..."
-        if DEBIAN_FRONTEND=noninteractive apt install -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
-            log_message "Installation completed successfully"
-        else
-            log_message "ERROR: Failed to install/update packages"
-            exit 1
-        fi
-    fi
-else
-    log_message "Installing pathvector and $BIRD_VERSION..."
-    if DEBIAN_FRONTEND=noninteractive apt install -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
-        log_message "Installation completed successfully"
-    else
-        log_message "ERROR: Failed to install packages"
-        exit 1
-    fi
-fi
-
-# Verify installation
-if command -v pathvector >/dev/null 2>&1; then
-    PATHVECTOR_VERSION=$(pathvector version 2>/dev/null || echo "unknown")
-    log_message "pathvector installed: version $PATHVECTOR_VERSION"
-else
-    log_message "WARNING: pathvector command not found after installation"
-fi
-
-if command -v bird >/dev/null 2>&1; then
-    BIRD_VERSION_INFO=$(bird --version 2>&1 | head -n1 || echo "unknown")
-    log_message "$BIRD_VERSION installed: $BIRD_VERSION_INFO"
-else
-    log_message "WARNING: bird command not found after installation"
-fi
-
-# Setup pathvector configuration after successful installation
-setup_pathvector_config
-
-# Enable + (re)start services so they come up now and on future boots
-BIRD_UNIT="$(detect_bird_unit)"
-log_message "Enabling and starting Bird service (unit: $BIRD_UNIT)..."
-ensure_enabled_and_started "$BIRD_UNIT"
+        ;;
+esac
 
 log_message "$SCRIPT_NAME completed successfully"
 exit 0

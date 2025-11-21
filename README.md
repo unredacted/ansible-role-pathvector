@@ -8,6 +8,8 @@ An Ansible role to install and configure [Pathvector](https://pathvector.io/) & 
 - Automatic OS detection (Debian/Ubuntu) with proper repository configuration
 - Automatic detection of UniFi vs standard Debian systems
 - Persistent UniFi on-boot scripts that survive firmware updates
+- **Shadow Gateway Support**: Automatically provisions shadow gateways (HA) at 169.254.254.3
+- **Cron Mode**: Ensures services are running and enabled without full re-installation
 - Standard APT installation for Debian/Ubuntu systems
 - BGP AS-path prepend optimization script
 - Support for mixed infrastructure (UniFi + Debian in same playbook)
@@ -109,6 +111,8 @@ pathvector_script_flags: ""                    # Prepend script flags
 pathvector_unifi_script_name: "1-unifi-pathvector-setup.sh"  # On-boot script name
 pathvector_unifi_run_immediately: false                      # Install immediately
 pathvector_unifi_autostart_services: false                   # Auto-start bird service
+udm_boot_version: "1.0.2"                                    # Version of udm-boot for shadow gateway
+
 ```
 
 ### Repository Configuration
@@ -135,6 +139,17 @@ pathvector_repo_component: "main"
    - Copies config from persistent storage to `/etc/`
    - Runs `pathvector generate`
    - Logs to `/var/log/unifi-pathvector-setup.log`
+4. **Shadow Gateway**: The script automatically checks for a shadow gateway at `169.254.254.3`. If found:
+   - Copies itself and the config to the shadow gateway
+   - Installs `udm-boot` if missing
+   - Runs the setup on the shadow gateway
+
+### Cron Mode
+The script supports a `--cron` flag which is lighter weight:
+- Checks if Bird is running and enabled
+- Restarts/Enables if necessary
+- Does NOT attempt to install packages or modify config
+- Useful for periodic health checks
 
 ### For Debian/Ubuntu Systems
 1. Adds CZ.NIC official Bird repository (configures based on OS release)
