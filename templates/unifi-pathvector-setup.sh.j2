@@ -25,6 +25,9 @@ UDM_BOOT_URL="https://github.com/unifi-utilities/unifios-utilities/raw/main/on-b
 MODE="install"
 FORCE_MODE=false
 SKIP_SHADOW=false
+PRIMARY_STATUS="UNKNOWN"
+SHADOW_STATUS="NOT DETECTED"
+SHADOW_IP="169.254.254.3"
 
 # Parse command line arguments
 # Parse command line arguments
@@ -70,6 +73,21 @@ done
 # Function to log messages
 log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+# Function to print summary
+print_summary() {
+    echo ""
+    echo "=================================================="
+    echo "              EXECUTION SUMMARY                   "
+    echo "=================================================="
+    echo "Mode: $MODE"
+    echo "Primary Gateway: $PRIMARY_STATUS"
+    if [ "$SKIP_SHADOW" != "true" ]; then
+        echo "Shadow Gateway:  $SHADOW_STATUS"
+    fi
+    echo "=================================================="
+    echo ""
 }
 
 # Determine the correct bird service unit name
@@ -147,31 +165,44 @@ handle_shadow_gateway() {
         return 0
     fi
 
-    if ping -c 1 -W 1 "$shadow_ip" >/dev/null 2>&1; then
-        log_message "Shadow gateway detected at $shadow_ip"
+    if ping -c 1 -W 1 "$SHADOW_IP" >/dev/null 2>&1; then
+        log_message "Shadow gateway detected at $SHADOW_IP"
         
         # Copy script and config to shadow
         log_message "Copying script and config to shadow gateway..."
-        scp "$0" "${shadow_user}@${shadow_ip}:${0}"
-        scp "$CONFIG_SOURCE" "${shadow_user}@${shadow_ip}:${CONFIG_SOURCE}"
-        
-        # Run setup on shadow
-        log_message "Running setup on shadow gateway..."
-        ssh "${shadow_user}@${shadow_ip}" "bash -s" <<EOF
-            # Check for on_boot.d support
-            if [ ! -d "/data/on_boot.d" ]; then
-                echo "Installing udm-boot on shadow gateway..."
-                curl -L "${UDM_BOOT_URL}" -o "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
-                dpkg -i "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
-                systemctl daemon-reload
-                systemctl enable udm-boot
-                rm "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
-            fi
+        if scp "$0" "${shadow_user}@${SHADOW_IP}:${0}" && \
+           scp "$CONFIG_SOURCE" "${shadow_user}@${SHADOW_IP}:${CONFIG_SOURCE}"; then
             
-            # Run the script
-            chmod +x "$0"
-            "$0" --${MODE} --skip-shadow $( [ "$FORCE_MODE" = "true" ] && echo "--force" )
+            # Run setup on shadow
+            log_message "Running setup on shadow gateway..."
+            if ssh "${shadow_user}@${SHADOW_IP}" "bash -s" <<EOF
+                # Check for on_boot.d support
+                if [ ! -d "/data/on_boot.d" ]; then
+                    echo "Installing udm-boot on shadow gateway..."
+                    curl -L "${UDM_BOOT_URL}" -o "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
+                    dpkg -i "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
+                    systemctl daemon-reload
+                    systemctl enable udm-boot
+                    rm "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
+                fi
+                
+                # Run the script
+                chmod +x "$0"
+                "$0" --${MODE} --skip-shadow $( [ "$FORCE_MODE" = "true" ] && echo "--force" )
 EOF
+            then
+                SHADOW_STATUS="SUCCESS"
+                log_message "Shadow gateway setup completed successfully"
+            else
+                SHADOW_STATUS="FAILURE"
+                log_message "ERROR: Shadow gateway setup failed"
+            fi
+        else
+            SHADOW_STATUS="COPY_FAILED"
+            log_message "ERROR: Failed to copy files to shadow gateway"
+        fi
+    else
+        SHADOW_STATUS="NOT DETECTED"
     fi
 }
 
@@ -203,15 +234,48 @@ handle_shadow_gateway
 case $MODE in
     cron)
         run_cron_checks
+        PRIMARY_STATUS="SUCCESS" # Cron checks are usually silent/safe
         ;;
         
     check)
         BIRD_UNIT="$(detect_bird_unit)"
-        systemctl status "$BIRD_UNIT" --no-pager
-        pathvector version
-        bird --version
-        log_message "Running pathvector generate..."
-        pathvector generate
+        PRIMARY_STATUS="SUCCESS"
+
+        # Check Bird Service
+        if systemctl list-unit-files --type=service 2>/dev/null | grep -q "$BIRD_UNIT"; then
+             if systemctl is-active --quiet "$BIRD_UNIT"; then
+                 log_message "Service $BIRD_UNIT is running"
+                 systemctl status "$BIRD_UNIT" --no-pager
+             else
+                 log_message "WARNING: Service $BIRD_UNIT is not running"
+                 systemctl status "$BIRD_UNIT" --no-pager
+                 PRIMARY_STATUS="FAILURE"
+             fi
+        else
+             log_message "ERROR: Service $BIRD_UNIT not found"
+             PRIMARY_STATUS="FAILURE"
+        fi
+
+        # Check Pathvector
+        if command -v pathvector >/dev/null 2>&1; then
+            pathvector version
+            log_message "Running pathvector generate..."
+            if ! pathvector generate; then
+                log_message "ERROR: pathvector generate failed"
+                PRIMARY_STATUS="FAILURE"
+            fi
+        else
+            log_message "ERROR: pathvector command not found"
+            PRIMARY_STATUS="FAILURE"
+        fi
+
+        # Check Bird Binary
+        if command -v bird >/dev/null 2>&1; then
+            bird --version
+        else
+            log_message "ERROR: bird command not found"
+            PRIMARY_STATUS="FAILURE"
+        fi
         ;;
         
     install)
@@ -233,6 +297,8 @@ case $MODE in
             ensure_enabled_and_started "$BIRD_UNIT"
 
             log_message "$SCRIPT_NAME completed (packages already installed)"
+            PRIMARY_STATUS="SUCCESS"
+            print_summary
             exit 0
         fi
 
@@ -357,5 +423,16 @@ case $MODE in
         ;;
 esac
 
-log_message "$SCRIPT_NAME completed successfully"
-exit 0
+log_message "$SCRIPT_NAME completed"
+
+if [ "$PRIMARY_STATUS" = "UNKNOWN" ]; then
+    PRIMARY_STATUS="SUCCESS"
+fi
+
+print_summary
+
+if [ "$PRIMARY_STATUS" = "FAILURE" ] || [ "$SHADOW_STATUS" = "FAILURE" ] || [ "$SHADOW_STATUS" = "COPY_FAILED" ]; then
+    exit 1
+else
+    exit 0
+fi
