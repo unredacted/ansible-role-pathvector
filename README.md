@@ -7,7 +7,7 @@ An Ansible role to install and configure [Pathvector](https://pathvector.io/) & 
 - Installs Bird2 or Bird3 from official CZ.NIC repositories  
 - Automatic OS detection (Debian/Ubuntu) with proper repository configuration
 - Automatic detection of UniFi vs standard Debian systems
-- Persistent UniFi on-boot scripts that survive firmware updates
+- Persistent UniFi on-boot scripts that survive firmware updates (via [unifi-on-boot](https://github.com/unredacted/unifi-on-boot))
 - **Shadow Gateway Support**: Automatically provisions shadow gateways (HA) at 169.254.254.3
 - **Cron Mode**: Ensures services are running and enabled without full re-installation
 - Standard APT installation for Debian/Ubuntu systems
@@ -19,7 +19,7 @@ An Ansible role to install and configure [Pathvector](https://pathvector.io/) & 
 - **Supported Systems**:
   - Debian 11 (Bullseye), 12 (Bookworm)
   - Ubuntu 22.04 (Jammy), 24.04 (Noble)
-  - UniFi devices with 4.x firmware and `/data/on_boot.d/` support installed via [unifios-utilities](https://github.com/unifi-utilities/unifios-utilities/tree/main/on-boot-script-2.x)
+  - UniFi devices with 2.x-5.x firmware and [unifi-on-boot](https://github.com/unredacted/unifi-on-boot) installed for `/data/on_boot.d/` support
 - **Ansible**: 2.9+
 - **Python**: 3.6+ (with `requests`, `ipaddress`, `ruamel.yaml` for prepend script)
 
@@ -108,12 +108,13 @@ pathvector_script_flags: ""                    # Prepend script flags
 
 ### UniFi-Specific Variables
 ```yaml
-pathvector_unifi_script_name: "1-unifi-pathvector-setup.sh"  # On-boot script name
-pathvector_unifi_run_immediately: false                      # Install immediately
-pathvector_unifi_autostart_services: false                   # Auto-start bird service
-udm_boot_version: "1.0.2"                                    # Version of udm-boot for shadow gateway
-
+pathvector_unifi_script_name: "01-unifi-pathvector-setup.sh"  # On-boot script name
+pathvector_unifi_run_immediately: false                       # Install immediately
+pathvector_unifi_autostart_services: false                    # Auto-start bird service
+unifi_on_boot_version: "1.0.0"                                # Version of unifi-on-boot for shadow gateway
 ```
+
+> **Note:** This role requires [unifi-on-boot](https://github.com/unredacted/unifi-on-boot) to be installed on your UniFi devices for boot script persistence across firmware upgrades. The old `udm-boot` / `udm-boot-2x` packages from unifios-utilities do **not** survive firmware upgrades.
 
 ### Repository Configuration
 ```yaml
@@ -141,7 +142,7 @@ pathvector_repo_component: "main"
    - Logs to `/var/log/unifi-pathvector-setup.log`
 4. **Shadow Gateway**: The script automatically checks for a shadow gateway at `169.254.254.3`. If found:
    - Copies itself and the config to the shadow gateway
-   - Installs `udm-boot` if missing
+   - Installs [unifi-on-boot](https://github.com/unredacted/unifi-on-boot) if missing
    - Runs the setup on the shadow gateway
 
 ### Cron Mode

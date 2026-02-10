@@ -20,8 +20,8 @@ SCRIPT_NAME="unifi-pathvector-setup"
 LOG_FILE="/var/log/${SCRIPT_NAME}.log"
 CONFIG_SOURCE="/data/on_boot.d/pathvector.yml"
 CONFIG_DEST="{{ pathvector_config_path | default('/etc/pathvector.yml') }}"
-UDM_BOOT_VERSION="{{ udm_boot_version | default('1.0.2') }}"
-UDM_BOOT_URL="https://github.com/unifi-utilities/unifios-utilities/raw/main/on-boot-script-2.x/packages/udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
+UNIFI_ON_BOOT_VERSION="{{ unifi_on_boot_version | default('1.0.0') }}"
+UNIFI_ON_BOOT_URL="https://github.com/{{ unifi_on_boot_github_repo | default('unredacted/unifi-on-boot') }}/releases/download/v${UNIFI_ON_BOOT_VERSION}/unifi-on-boot_${UNIFI_ON_BOOT_VERSION}_all.deb"
 MODE="install"
 FORCE_MODE=false
 SKIP_SHADOW=false
@@ -176,14 +176,12 @@ handle_shadow_gateway() {
             # Run setup on shadow
             log_message "Running setup on shadow gateway..."
             if ssh "${shadow_user}@${SHADOW_IP}" "bash -s" <<EOF
-                # Check for on_boot.d support
-                if [ ! -d "/data/on_boot.d" ]; then
-                    echo "Installing udm-boot on shadow gateway..."
-                    curl -L "${UDM_BOOT_URL}" -o "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
-                    dpkg -i "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
-                    systemctl daemon-reload
-                    systemctl enable udm-boot
-                    rm "udm-boot-2x_${UDM_BOOT_VERSION}_all.deb"
+                # Install unifi-on-boot if not present
+                if ! dpkg -l unifi-on-boot >/dev/null 2>&1; then
+                    echo "Installing unifi-on-boot on shadow gateway..."
+                    curl -fsSL "${UNIFI_ON_BOOT_URL}" -o "unifi-on-boot_${UNIFI_ON_BOOT_VERSION}_all.deb"
+                    dpkg -i "unifi-on-boot_${UNIFI_ON_BOOT_VERSION}_all.deb"
+                    rm "unifi-on-boot_${UNIFI_ON_BOOT_VERSION}_all.deb"
                 fi
                 
                 # Run the script
