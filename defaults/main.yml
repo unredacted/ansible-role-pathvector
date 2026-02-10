@@ -26,5 +26,5 @@ pathvector_unifi_script_name: "01-unifi-pathvector-setup.sh"  # Name of the scri
 pathvector_unifi_only: false                      # If true, skip standard installation on UniFi systems
 pathvector_unifi_run_immediately: false           # Run the UniFi script immediately after deployment
 pathvector_unifi_autostart_services: false        # Auto-start bird service in UniFi script
-unifi_on_boot_version: "1.0.4"                      # Version of unifi-on-boot to install on shadow gateway if missing
+unifi_on_boot_version: "1.0.5"                      # Version of unifi-on-boot to install on shadow gateway if missing
 unifi_on_boot_github_repo: "unredacted/unifi-on-boot" # GitHub repo for unifi-on-boot releases
