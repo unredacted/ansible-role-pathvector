@@ -8,6 +8,7 @@ platforms:
     image: debian:bookworm
     pre_build_image: true
     privileged: true
+    cgroupns_mode: host
     command: /sbin/init
     tmpfs:
       - /run
