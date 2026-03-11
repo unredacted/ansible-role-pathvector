@@ -5,11 +5,11 @@ driver:
   name: docker
 platforms:
   - name: pathvector-debian
-    image: debian:bookworm
+    image: geerlingguy/docker-debian12-ansible:latest
     pre_build_image: true
     privileged: true
     cgroupns_mode: host
-    command: /sbin/init
+    command: ""
     tmpfs:
       - /run
       - /tmp
