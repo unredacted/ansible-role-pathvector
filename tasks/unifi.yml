@@ -61,17 +61,67 @@
           - "Location: /data/on_boot.d/pathvector.yml"
       when: pathvector_debug | bool
 
-# Run scripts and sync to shadow via unifi-on-boot
-# This runs all on_boot.d scripts (including pathvector setup) then rsyncs to shadow.
-# The pathvector script handles: copy config to /etc, pathvector generate, start bird.
-- name: Apply configuration via unifi-on-boot
-  ansible.builtin.systemd:
-    name: unifi-on-boot
-    state: restarted
+# Run the pathvector setup script directly when config or script changes.
+# Do NOT use systemctl restart unifi-on-boot — that re-runs ALL scripts
+# in /data/on_boot.d/ and will bounce BGP sessions.
+- name: Run pathvector setup script
+  ansible.builtin.command: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
   when:
     - pathvector_unifi_run_immediately | default(true)
     - (unifi_config_deployed is defined and unifi_config_deployed.changed) or
       (unifi_script_deployed is defined and unifi_script_deployed.changed)
+  register: unifi_script_result
+  changed_when: "'pathvector generate completed' in (unifi_script_result.stdout | default(''))"
+  failed_when: unifi_script_result.rc != 0
+
+- name: Display setup script output
+  ansible.builtin.debug:
+    var: unifi_script_result.stdout_lines
+  when:
+    - unifi_script_result is defined
+    - unifi_script_result is not skipped
+    - pathvector_debug | bool
+
+# Sync /data/on_boot.d/ to shadow and run ONLY the pathvector script there.
+# This avoids systemctl restart unifi-on-boot which would re-run all scripts.
+- name: Sync config to shadow gateway
+  ansible.builtin.shell: |
+    SHADOW_CONF="/data/unifi-on-boot/shadow.conf"
+    SHADOW_IP="{{ pathvector_ha_shadow_ip | default('169.254.254.3') }}"
+    SHADOW_USER="root"
+    SCRIPT_NAME="{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
+
+    # Load shadow config if present
+    if [ -f "$SHADOW_CONF" ]; then
+      . "$SHADOW_CONF"
+      SHADOW_IP="${SHADOW_IP:-{{ pathvector_ha_shadow_ip | default('169.254.254.3') }}}"
+      SHADOW_USER="${SHADOW_USER:-root}"
+      if [ "${SHADOW_ENABLED:-true}" != "true" ]; then
+        echo "Shadow sync disabled"
+        exit 0
+      fi
+    fi
+
+    # Check if shadow is reachable
+    if ! ping -c 1 -W 2 "$SHADOW_IP" >/dev/null 2>&1; then
+      echo "Shadow gateway not reachable at $SHADOW_IP (skipping)"
+      exit 0
+    fi
+
+    # Rsync /data/on_boot.d/ to shadow
+    rsync -avz --delete -e "ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no" \
+      /data/on_boot.d/ "${SHADOW_USER}@${SHADOW_IP}:/data/on_boot.d/" 2>&1
+
+    # Run only the pathvector script on shadow (not all scripts)
+    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${SHADOW_USER}@${SHADOW_IP}" \
+      "/data/on_boot.d/${SCRIPT_NAME}" 2>&1
+  args:
+    executable: /bin/bash
+  when:
+    - pathvector_unifi_run_immediately | default(true)
+    - (unifi_config_deployed is defined and unifi_config_deployed.changed) or
+      (unifi_script_deployed is defined and unifi_script_deployed.changed)
+  changed_when: false
   failed_when: false
 
 # Verify UniFi deployment
