@@ -20,6 +20,6 @@
   when: not is_unifi_system | bool
 
 - name: run unifi setup script
-  ansible.builtin.command: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('1-unifi-pathvector-setup.sh') }}"
+  ansible.builtin.command: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
   changed_when: true
   when: is_unifi_system | bool

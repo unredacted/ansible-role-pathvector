@@ -8,11 +8,13 @@ An Ansible role to install and configure [Pathvector](https://pathvector.io/) & 
 - Automatic OS detection (Debian/Ubuntu) with proper repository configuration
 - Automatic detection of UniFi vs standard Debian systems
 - Persistent UniFi on-boot scripts that survive firmware updates (via [unifi-on-boot](https://github.com/unredacted/unifi-on-boot))
-- **Shadow Gateway Support**: Automatically provisions shadow gateways (HA) at 169.254.254.3
+- **Shadow Gateway Support**: Automatically handled by [unifi-on-boot](https://github.com/unredacted/unifi-on-boot) (v1.1.0+) which syncs all `/data/on_boot.d/` scripts to the shadow gateway
 - **Cron Mode**: Ensures services are running and enabled without full re-installation
 - Standard APT installation for Debian/Ubuntu systems
 - BGP AS-path prepend optimization script
 - Support for mixed infrastructure (UniFi + Debian in same playbook)
+- **Config validation**: Validates Bird configuration after generation
+- **Deploy-only mode**: Deploy configuration without installing packages
 
 ## Requirements
 
@@ -104,6 +106,8 @@ pathvector_config_path: "/etc/pathvector.yml"  # Config destination
 pathvector_debug: false                        # Enable debug output
 pathvector_run_script: false                   # Run prepend optimization
 pathvector_script_flags: ""                    # Prepend script flags
+pathvector_deploy_only: false                  # Deploy config only (skip install)
+pathvector_skip_install: false                 # Skip package install (repos still configured)
 ```
 
 ### UniFi-Specific Variables
@@ -111,10 +115,9 @@ pathvector_script_flags: ""                    # Prepend script flags
 pathvector_unifi_script_name: "01-unifi-pathvector-setup.sh"  # On-boot script name
 pathvector_unifi_run_immediately: false                       # Install immediately
 pathvector_unifi_autostart_services: false                    # Auto-start bird service
-unifi_on_boot_version: "1.0.0"                                # Version of unifi-on-boot for shadow gateway
 ```
 
-> **Note:** This role requires [unifi-on-boot](https://github.com/unredacted/unifi-on-boot) to be installed on your UniFi devices for boot script persistence across firmware upgrades. The old `udm-boot` / `udm-boot-2x` packages from unifios-utilities do **not** survive firmware upgrades.
+> **Note:** This role requires [unifi-on-boot](https://github.com/unredacted/unifi-on-boot) (v1.1.0+) to be installed on your UniFi devices. The on-boot script will check for this dependency and exit with an error if not found. Shadow gateway sync is handled automatically by `unifi-on-boot`.
 
 ### Repository Configuration
 ```yaml
@@ -136,14 +139,16 @@ pathvector_repo_component: "main"
 1. Deploys a persistent on-boot script to `/data/on_boot.d/`
 2. Copies your configuration to `/data/on_boot.d/pathvector.yml`
 3. On boot, the script:
+   - Verifies `unifi-on-boot` is installed (exits with error if not)
    - Installs bird2 and pathvector (if needed)
-   - Copies config from persistent storage to `/etc/`
+   - Copies config from persistent storage to `/etc/` (only if changed, using SHA256 checksums)
    - Runs `pathvector generate`
+   - Validates the generated Bird configuration with `bird -p`
+   - Triggers `unifi-on-boot` to sync to shadow gateway
    - Logs to `/var/log/unifi-pathvector-setup.log`
-4. **Shadow Gateway**: The script automatically checks for a shadow gateway at `169.254.254.3`. If found:
-   - Copies itself and the config to the shadow gateway
-   - Installs [unifi-on-boot](https://github.com/unredacted/unifi-on-boot) if missing
-   - Runs the setup on the shadow gateway
+
+### Shadow Gateway
+Shadow gateway sync is handled by [unifi-on-boot](https://github.com/unredacted/unifi-on-boot) (v1.1.0+), which automatically `rsync --delete`s the entire `/data/on_boot.d/` directory to the shadow gateway at `169.254.254.3` after running all scripts. This ensures the shadow has an identical set of scripts and configurations.
 
 ### Cron Mode
 The script supports a `--cron` flag which is lighter weight:
@@ -190,6 +195,16 @@ The script supports a `--cron` flag which is lighter weight:
   vars:
     pathvector_unifi_run_immediately: true
     pathvector_unifi_autostart_services: true
+```
+
+### Deploy Config Only (Skip Package Install)
+```yaml
+- hosts: routers
+  become: yes
+  roles:
+    - unredacted.pathvector
+  vars:
+    pathvector_deploy_only: true
 ```
 
 ### Enable Prepend Optimization

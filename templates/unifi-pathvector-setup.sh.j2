@@ -1,8 +1,9 @@
 #!/bin/bash
 # UniFi on-boot script to install Bird (bird2/bird3) and pathvector
 # Auto-deployed by Ansible
-# Place this file in /data/on_boot.d/ (UniFi OS) or /config/scripts/post-config.d/ (EdgeOS)
-# Make it executable: chmod +x /data/on_boot.d/1-unifi-pathvector-setup.sh
+# Requires: unifi-on-boot (https://github.com/unredacted/unifi-on-boot)
+# Place this file in /data/on_boot.d/ (UniFi OS)
+# Make it executable: chmod +x /data/on_boot.d/01-unifi-pathvector-setup.sh
 
 # Bird Configuration Variables (templated by Ansible)
 BIRD_VERSION="{{ bird_version | default('bird2') }}"
@@ -18,18 +19,12 @@ REPO_COMPONENT="{{ pathvector_repo_component | default('main') }}"
 # Script Configuration
 SCRIPT_NAME="unifi-pathvector-setup"
 LOG_FILE="/var/log/${SCRIPT_NAME}.log"
-CONFIG_SOURCE="/data/on_boot.d/pathvector.yml"
+CONFIG_SOURCE="{{ pathvector_unifi_config_source | default('/data/on_boot.d/pathvector.yml') }}"
 CONFIG_DEST="{{ pathvector_config_path | default('/etc/pathvector.yml') }}"
-UNIFI_ON_BOOT_VERSION="{{ unifi_on_boot_version | default('1.0.0') }}"
-UNIFI_ON_BOOT_URL="https://github.com/{{ unifi_on_boot_github_repo | default('unredacted/unifi-on-boot') }}/releases/download/v${UNIFI_ON_BOOT_VERSION}/unifi-on-boot_${UNIFI_ON_BOOT_VERSION}_all.deb"
 MODE="install"
 FORCE_MODE=false
-SKIP_SHADOW=false
 PRIMARY_STATUS="UNKNOWN"
-SHADOW_STATUS="NOT DETECTED"
-SHADOW_IP="169.254.254.3"
 
-# Parse command line arguments
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -45,10 +40,6 @@ while [[ $# -gt 0 ]]; do
             MODE="cron"
             shift
             ;;
-        --skip-shadow)
-            SKIP_SHADOW=true
-            shift
-            ;;
         --force)
             FORCE_MODE=true
             shift
@@ -59,7 +50,6 @@ while [[ $# -gt 0 ]]; do
             echo "  --check    Check status of services"
             echo "  --cron     Run in cron mode (ensure services running, auto-start)"
             echo "  --force    Force update/re-install"
-            echo "  --skip-shadow Skip shadow gateway checks (internal use)"
             exit 0
             ;;
         *)
@@ -75,6 +65,14 @@ log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
+# Check for unifi-on-boot dependency
+if ! dpkg -l unifi-on-boot 2>/dev/null | grep -q '^ii'; then
+    log_message "ERROR: unifi-on-boot is not installed."
+    log_message "ERROR: This script requires unifi-on-boot for boot persistence and shadow gateway sync."
+    log_message "ERROR: Install it first: https://github.com/unredacted/unifi-on-boot"
+    exit 1
+fi
+
 # Function to print summary
 print_summary() {
     echo ""
@@ -83,9 +81,6 @@ print_summary() {
     echo "=================================================="
     echo "Mode: $MODE"
     echo "Primary Gateway: $PRIMARY_STATUS"
-    if [ "$SKIP_SHADOW" != "true" ]; then
-        echo "Shadow Gateway:  $SHADOW_STATUS"
-    fi
     echo "=================================================="
     echo ""
 }
@@ -103,11 +98,43 @@ detect_bird_unit() {
     echo "bird.service"
 }
 
-# Ensure a service is enabled and started (with a network-online dependency for Bird)
-ensure_enabled_and_started() {
+# HA Configuration Variables (templated by Ansible)
+HA_PRIMARY_IP="{{ pathvector_ha_primary_ip | default('169.254.254.1') }}"
+HA_SHADOW_IP="{{ pathvector_ha_shadow_ip | default('169.254.254.3') }}"
+HA_BIRD_PORT="{{ pathvector_ha_bird_port | default(179) }}"
+HA_SHADOW_WAIT_TIMEOUT="{{ pathvector_ha_shadow_wait_timeout | default(60) }}"
+
+# Check if this is the shadow (standby) gateway in a UniFi HA pair.
+# Shadow owns HA_SHADOW_IP; primary owns HA_PRIMARY_IP.
+# Non-HA gateways have neither IP and are NOT shadows.
+is_shadow_gateway() {
+    ip addr show 2>/dev/null | grep -q "${HA_SHADOW_IP}/" \
+      && ! ip addr show 2>/dev/null | grep -q "${HA_PRIMARY_IP}/"
+}
+
+# On the shadow, wait for the primary's bird to be listening on the BGP port.
+# Once the primary holds the source addresses, strict bind prevents the
+# shadow from stealing them.
+wait_for_primary_bird() {
+    local max_wait="$HA_SHADOW_WAIT_TIMEOUT" waited=0
+    log_message "Shadow gateway — waiting for primary bird (${HA_PRIMARY_IP}:${HA_BIRD_PORT})..."
+    while [ $waited -lt $max_wait ]; do
+        if nc -z -w1 "$HA_PRIMARY_IP" "$HA_BIRD_PORT" 2>/dev/null; then
+            log_message "Primary bird confirmed up after ${waited}s"
+            return 0
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+    log_message "WARNING: Timed out waiting for primary bird (${max_wait}s). Starting anyway."
+}
+
+# Ensure bird is enabled and running (never restart — pathvector generate
+# calls birdc configure for graceful zero-downtime config reloads).
+ensure_bird_running() {
     local svc="$1"
 
-    # Add a drop-in so the service waits for the network to be online (useful for routing daemons)
+    # Add a drop-in so the service waits for the network to be online
     local dropin_dir="/etc/systemd/system/${svc}.d"
     mkdir -p "$dropin_dir"
     cat > "${dropin_dir}/override.conf" <<'EOF'
@@ -116,17 +143,40 @@ Wants=network-online.target
 After=network-online.target
 EOF
 
-    # Reload, enable on boot, and start (or restart if already running)
     systemctl daemon-reload
-    systemctl enable --now "$svc" 2>/dev/null || systemctl enable "$svc" 2>/dev/null
-    if systemctl is-active --quiet "$svc"; then
-        systemctl restart "$svc"
-    else
+    systemctl enable "$svc" 2>/dev/null || true
+
+    # Only start if not already running — never restart
+    if ! systemctl is-active --quiet "$svc"; then
+        # On shadow, wait for primary bird first to avoid session stealing
+        if is_shadow_gateway; then
+            wait_for_primary_bird
+        fi
+        log_message "Bird is not running, starting $svc..."
         systemctl start "$svc" || true
+    else
+        log_message "Bird already running — config reload handled by pathvector generate"
     fi
 }
 
-# Function to setup pathvector configuration
+# Function to validate bird configuration
+validate_bird_config() {
+    if command -v bird >/dev/null 2>&1; then
+        log_message "Validating Bird configuration..."
+        if bird -p 2>&1 | tee -a "$LOG_FILE"; then
+            log_message "Bird configuration is valid"
+            return 0
+        else
+            log_message "WARNING: Bird configuration validation failed"
+            return 1
+        fi
+    else
+        log_message "Bird not installed yet, skipping config validation"
+        return 0
+    fi
+}
+
+# Function to setup pathvector configuration (checksum-based copy, always regenerate)
 setup_pathvector_config() {
     log_message "Setting up pathvector configuration..."
 
@@ -136,71 +186,38 @@ setup_pathvector_config() {
         return 1
     fi
 
-    # Copy configuration file
-    log_message "Copying pathvector configuration from $CONFIG_SOURCE to $CONFIG_DEST"
-    if cp "$CONFIG_SOURCE" "$CONFIG_DEST"; then
-        log_message "Configuration copied successfully"
+    # Compare checksums to avoid unnecessary copy
+    local needs_copy=true
+    if [ -f "$CONFIG_DEST" ]; then
+        local src_hash dest_hash
+        src_hash=$(sha256sum "$CONFIG_SOURCE" 2>/dev/null | awk '{print $1}')
+        dest_hash=$(sha256sum "$CONFIG_DEST" 2>/dev/null | awk '{print $1}')
 
-        # Generate pathvector configuration
-        log_message "Running pathvector generate..."
-        if pathvector generate 2>&1 | tee -a "$LOG_FILE"; then
-            log_message "pathvector generate completed successfully"
-            return 0
-        else
-            log_message "ERROR: pathvector generate failed"
+        if [ "$src_hash" = "$dest_hash" ]; then
+            log_message "Configuration unchanged (checksums match), skipping copy"
+            needs_copy=false
+        fi
+    fi
+
+    # Copy configuration file if needed
+    if [ "$needs_copy" = "true" ]; then
+        log_message "Copying pathvector configuration from $CONFIG_SOURCE to $CONFIG_DEST"
+        if ! cp "$CONFIG_SOURCE" "$CONFIG_DEST"; then
+            log_message "ERROR: Failed to copy configuration file"
             return 1
         fi
-    else
-        log_message "ERROR: Failed to copy configuration file"
-        return 1
+        log_message "Configuration copied successfully"
     fi
-}
 
-# Function to handle shadow gateway
-handle_shadow_gateway() {
-    local shadow_ip="169.254.254.3"
-    local shadow_user="root" # Assuming root access is available/keyed
-
-    if [ "$SKIP_SHADOW" = "true" ]; then
+    # Always regenerate — idempotent, fast, and recovers corrupted BIRD configs
+    log_message "Running pathvector generate..."
+    if pathvector generate 2>&1 | tee -a "$LOG_FILE"; then
+        log_message "pathvector generate completed successfully"
+        validate_bird_config
         return 0
-    fi
-
-    if ping -c 1 -W 1 "$SHADOW_IP" >/dev/null 2>&1; then
-        log_message "Shadow gateway detected at $SHADOW_IP"
-        
-        # Copy script and config to shadow
-        log_message "Copying script and config to shadow gateway..."
-        if scp "$0" "${shadow_user}@${SHADOW_IP}:${0}" && \
-           scp "$CONFIG_SOURCE" "${shadow_user}@${SHADOW_IP}:${CONFIG_SOURCE}"; then
-            
-            # Run setup on shadow
-            log_message "Running setup on shadow gateway..."
-            if ssh "${shadow_user}@${SHADOW_IP}" "bash -s" <<EOF
-                # Install unifi-on-boot if not present
-                if ! dpkg -l unifi-on-boot >/dev/null 2>&1; then
-                    echo "Installing unifi-on-boot on shadow gateway..."
-                    curl -fsSL "${UNIFI_ON_BOOT_URL}" -o "unifi-on-boot_${UNIFI_ON_BOOT_VERSION}_all.deb"
-                    dpkg -i "unifi-on-boot_${UNIFI_ON_BOOT_VERSION}_all.deb"
-                    rm "unifi-on-boot_${UNIFI_ON_BOOT_VERSION}_all.deb"
-                fi
-                
-                # Run the script
-                chmod +x "$0"
-                "$0" --${MODE} --skip-shadow $( [ "$FORCE_MODE" = "true" ] && echo "--force" )
-EOF
-            then
-                SHADOW_STATUS="SUCCESS"
-                log_message "Shadow gateway setup completed successfully"
-            else
-                SHADOW_STATUS="FAILURE"
-                log_message "ERROR: Shadow gateway setup failed"
-            fi
-        else
-            SHADOW_STATUS="COPY_FAILED"
-            log_message "ERROR: Failed to copy files to shadow gateway"
-        fi
     else
-        SHADOW_STATUS="NOT DETECTED"
+        log_message "ERROR: pathvector generate failed"
+        return 1
     fi
 }
 
@@ -213,21 +230,23 @@ run_cron_checks() {
     bird_unit="$(detect_bird_unit)"
     
     if ! systemctl is-active --quiet "$bird_unit"; then
-        log_message "Bird service ($bird_unit) is not running. Restarting..."
-        systemctl restart "$bird_unit"
+        log_message "Bird service ($bird_unit) is not running. Starting..."
+        systemctl start "$bird_unit"
     fi
     
     if ! systemctl is-enabled --quiet "$bird_unit"; then
         log_message "Bird service ($bird_unit) is not enabled. Enabling..."
         systemctl enable "$bird_unit"
     fi
+
+    # Re-evaluate listeners — picks up new IPs after HA failover.
+    # If this shadow was just promoted to primary, birdc configure
+    # discovers the newly available session IPs and establishes BGP.
+    birdc configure 2>/dev/null || true
 }
 
 # Main Script Start
 log_message "Starting $SCRIPT_NAME in $MODE mode"
-
-# Handle Shadow Gateway first
-handle_shadow_gateway
 
 case $MODE in
     cron)
@@ -289,10 +308,10 @@ case $MODE in
             # Apply config if present
             setup_pathvector_config
 
-            # Ensure services are enabled and started now and on future boots
+            # Ensure bird is running (start only, never restart)
             BIRD_UNIT="$(detect_bird_unit)"
-            log_message "Ensuring Bird service is enabled and started (unit: $BIRD_UNIT)..."
-            ensure_enabled_and_started "$BIRD_UNIT"
+            log_message "Ensuring Bird service is running (unit: $BIRD_UNIT)..."
+            ensure_bird_running "$BIRD_UNIT"
 
             log_message "$SCRIPT_NAME completed (packages already installed)"
             PRIMARY_STATUS="SUCCESS"
@@ -414,10 +433,10 @@ case $MODE in
         # Setup pathvector configuration after successful installation
         setup_pathvector_config
 
-        # Enable + (re)start services so they come up now and on future boots
+        # Ensure bird is running (start only, never restart)
         BIRD_UNIT="$(detect_bird_unit)"
-        log_message "Enabling and starting Bird service (unit: $BIRD_UNIT)..."
-        ensure_enabled_and_started "$BIRD_UNIT"
+        log_message "Ensuring Bird service is running (unit: $BIRD_UNIT)..."
+        ensure_bird_running "$BIRD_UNIT"
         ;;
 esac
 
@@ -429,7 +448,9 @@ fi
 
 print_summary
 
-if [ "$PRIMARY_STATUS" = "FAILURE" ] || [ "$SHADOW_STATUS" = "FAILURE" ] || [ "$SHADOW_STATUS" = "COPY_FAILED" ]; then
+
+
+if [ "$PRIMARY_STATUS" = "FAILURE" ]; then
     exit 1
 else
     exit 0

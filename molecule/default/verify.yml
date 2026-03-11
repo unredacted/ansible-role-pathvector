@@ -1,0 +1,47 @@
+---
+- name: Verify
+  hosts: all
+  become: true
+  tasks:
+    - name: Check Bird is installed
+      ansible.builtin.command: which bird
+      register: bird_check
+      changed_when: false
+
+    - name: Assert Bird is installed
+      ansible.builtin.assert:
+        that:
+          - bird_check.rc == 0
+        fail_msg: "Bird is not installed"
+
+    - name: Check Pathvector is installed
+      ansible.builtin.command: which pathvector
+      register: pathvector_check
+      changed_when: false
+
+    - name: Assert Pathvector is installed
+      ansible.builtin.assert:
+        that:
+          - pathvector_check.rc == 0
+        fail_msg: "Pathvector is not installed"
+
+    - name: Gather service facts
+      ansible.builtin.service_facts:
+
+    - name: Assert Bird service is enabled
+      ansible.builtin.assert:
+        that:
+          - "'bird.service' in ansible_facts.services"
+          - "ansible_facts.services['bird.service'].status == 'enabled'"
+        fail_msg: "Bird service is not enabled"
+
+    - name: Check Pathvector repo is configured
+      ansible.builtin.stat:
+        path: /etc/apt/sources.list.d/pathvector.list
+      register: pv_repo
+
+    - name: Assert Pathvector repo exists
+      ansible.builtin.assert:
+        that:
+          - pv_repo.stat.exists
+        fail_msg: "Pathvector APT repository is not configured"

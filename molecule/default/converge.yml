@@ -1,0 +1,8 @@
+---
+- name: Converge
+  hosts: all
+  become: true
+  tasks:
+    - name: Include ansible-role-pathvector
+      ansible.builtin.include_role:
+        name: ansible-role-pathvector

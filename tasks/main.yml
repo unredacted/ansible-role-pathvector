@@ -45,6 +45,31 @@
     - not is_unifi_system | bool
     - not pathvector_deploy_only
 
+# Config-only deployment (skips package install, just deploys config)
+- name: Deploy config only (deploy_only mode)
+  when:
+    - not is_unifi_system | bool
+    - pathvector_deploy_only | bool
+    - config_file_found | bool
+  block:
+    - name: Copy Pathvector configuration file (deploy_only)
+      ansible.builtin.copy:
+        src: "{{ pathvector_config_file }}"
+        dest: "{{ pathvector_config_path }}"
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+      register: deploy_only_config_result
+      notify: regenerate pathvector
+
+    - name: Display deploy_only result
+      ansible.builtin.debug:
+        msg:
+          - "Config deployed (deploy_only mode): {{ deploy_only_config_result.changed }}"
+          - "Destination: {{ pathvector_config_path }}"
+      when: pathvector_debug | bool
+
 # Post-deployment tasks (if any)
 - name: Display deployment summary
   ansible.builtin.debug:

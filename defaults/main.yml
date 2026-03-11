@@ -18,13 +18,19 @@ pathvector_config_path: "/etc/pathvector.yml"
 pathvector_debug: false
 pathvector_run_script: false
 pathvector_script_flags: ""
-pathvector_deploy_only: false
+pathvector_deploy_only: false  # If true, skip package install & only deploy config (non-UniFi only)
+pathvector_skip_install: false  # If true, skip package install tasks on Debian (repos still configured)
 
 # UniFi-specific configuration
 pathvector_deploy_unifi_script: true              # Deploy the on-boot script to UniFi systems
 pathvector_unifi_script_name: "01-unifi-pathvector-setup.sh"  # Name of the script in /data/on_boot.d/
 pathvector_unifi_only: false                      # If true, skip standard installation on UniFi systems
-pathvector_unifi_run_immediately: false           # Run the UniFi script immediately after deployment
+pathvector_unifi_run_immediately: true            # Run the UniFi script immediately after deployment
 pathvector_unifi_autostart_services: false        # Auto-start bird service in UniFi script
-unifi_on_boot_version: "1.0.8"                      # Version of unifi-on-boot to install on shadow gateway if missing
-unifi_on_boot_github_repo: "unredacted/unifi-on-boot" # GitHub repo for unifi-on-boot releases
+pathvector_unifi_config_source: "/data/on_boot.d/pathvector.yml"  # Persistent config location on UniFi
+
+# UniFi HA (High Availability) configuration
+pathvector_ha_primary_ip: "169.254.254.1"         # HA primary gateway link-local IP
+pathvector_ha_shadow_ip: "169.254.254.3"          # HA shadow gateway link-local IP
+pathvector_ha_bird_port: 179                      # BGP port to check for primary readiness
+pathvector_ha_shadow_wait_timeout: 60             # Seconds to wait for primary bird before starting on shadow

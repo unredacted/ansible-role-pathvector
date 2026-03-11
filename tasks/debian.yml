@@ -111,20 +111,6 @@
           - "Destination: {{ pathvector_config_path }}"
       when: pathvector_debug | bool
 
-    - name: Generate Pathvector configuration
-      ansible.builtin.command: pathvector generate
-      register: generate_result
-      changed_when: generate_result.rc == 0
-      notify: reload bird
-      when: not (pathvector_skip_install | default(false))
-
-    - name: Display Pathvector generate output
-      ansible.builtin.debug:
-        var: generate_result.stdout_lines
-      when:
-        - pathvector_debug | bool
-        - generate_result.stdout_lines is defined
-
     - name: Validate Bird configuration
       ansible.builtin.command: bird -p
       register: bird_validate
