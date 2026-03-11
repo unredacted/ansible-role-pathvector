@@ -11,6 +11,9 @@ name: CI
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   lint:
     name: Lint
@@ -76,3 +79,8 @@ jobs:
           --api-key ${{ secrets.GALAXY_API_KEY }}
           $(echo ${{ github.repository }} | cut -d/ -f1)
           $(echo ${{ github.repository }} | cut -d/ -f2)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
