@@ -82,46 +82,18 @@
     - unifi_script_result is not skipped
     - pathvector_debug | bool
 
-# Sync /data/on_boot.d/ to shadow and run ONLY the pathvector script there.
-# This avoids systemctl restart unifi-on-boot which would re-run all scripts.
-- name: Sync config to shadow gateway
-  ansible.builtin.shell: |
-    SHADOW_CONF="/data/unifi-on-boot/shadow.conf"
-    SHADOW_IP="{{ pathvector_ha_shadow_ip | default('169.254.254.3') }}"
-    SHADOW_USER="root"
-    SCRIPT_NAME="{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
-
-    # Load shadow config if present
-    if [ -f "$SHADOW_CONF" ]; then
-      . "$SHADOW_CONF"
-      SHADOW_IP="${SHADOW_IP:-{{ pathvector_ha_shadow_ip | default('169.254.254.3') }}}"
-      SHADOW_USER="${SHADOW_USER:-root}"
-      if [ "${SHADOW_ENABLED:-true}" != "true" ]; then
-        echo "Shadow sync disabled"
-        exit 0
-      fi
-    fi
-
-    # Check if shadow is reachable
-    if ! ping -c 1 -W 2 "$SHADOW_IP" >/dev/null 2>&1; then
-      echo "Shadow gateway not reachable at $SHADOW_IP (skipping)"
-      exit 0
-    fi
-
-    # Rsync /data/on_boot.d/ to shadow
-    rsync -avz --delete -e "ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no" \
-      /data/on_boot.d/ "${SHADOW_USER}@${SHADOW_IP}:/data/on_boot.d/" 2>&1
-
-    # Run only the pathvector script on shadow (not all scripts)
-    ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=no "${SHADOW_USER}@${SHADOW_IP}" \
-      "/data/on_boot.d/${SCRIPT_NAME}" 2>&1
-  args:
-    executable: /bin/bash
+# Trigger unifi-on-boot's built-in shadow gateway sync.
+# unifi-on-boot v1.1.0+ automatically rsyncs /data/on_boot.d/ to the shadow,
+# installs unifi-on-boot on the shadow if missing, and runs all scripts
+# with --skip-shadow to prevent recursion.
+- name: Trigger shadow gateway sync via unifi-on-boot
+  ansible.builtin.systemd:
+    name: unifi-on-boot
+    state: restarted
   when:
     - pathvector_unifi_run_immediately | default(true)
     - (unifi_config_deployed is defined and unifi_config_deployed.changed) or
       (unifi_script_deployed is defined and unifi_script_deployed.changed)
-  changed_when: false
   failed_when: false
 
 # Verify UniFi deployment
