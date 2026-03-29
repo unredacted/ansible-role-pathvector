@@ -1,36 +1,40 @@
 ---
 # defaults file for ansible-role-pathvector
-
 # Bird configuration
-bird_version: "bird2"  # Options: "bird2" or "bird3"
-bird_install_from_official: true  # Install from CZ.NIC official repos instead of distro repos
+bird_version: "bird2" # Options: "bird2" or "bird3"
+bird_install_from_official: true # Install from CZ.NIC official repos instead of distro repos
 bird_gpg_key_url: "https://pkg.labs.nic.cz/gpg"
+bird_gpg_key_id: "D959241751179EC7" # CZ.NIC Labs Packaging key ID (fallback if URL is unavailable)
 
 # Repository configuration
 pathvector_repo: "deb [signed-by=/usr/share/keyrings/pathvector.asc] https://repo.pathvector.io/apt/ stable main"
 pathvector_pgp_key_url: "https://repo.pathvector.io/pgp.asc"
+pathvector_pgp_key_id: "CF9AAE63E5517864" # Pathvector Code Signing key ID (fallback if URL is unavailable)
 pathvector_repo_url: "https://repo.pathvector.io/apt/"
 pathvector_repo_dist: "stable"
 pathvector_repo_component: "main"
+
+# GPG keyserver fallback (used when key URLs return 404 or are unreachable)
+gpg_keyserver: "keyserver.ubuntu.com"
 
 # Standard configuration
 pathvector_config_path: "/etc/pathvector.yml"
 pathvector_debug: false
 pathvector_run_script: false
 pathvector_script_flags: ""
-pathvector_deploy_only: false  # If true, skip package install & only deploy config (non-UniFi only)
-pathvector_skip_install: false  # If true, skip package install tasks on Debian (repos still configured)
+pathvector_deploy_only: false # If true, skip package install & only deploy config (non-UniFi only)
+pathvector_skip_install: false # If true, skip package install tasks on Debian (repos still configured)
 
 # UniFi-specific configuration
-pathvector_deploy_unifi_script: true              # Deploy the on-boot script to UniFi systems
-pathvector_unifi_script_name: "01-unifi-pathvector-setup.sh"  # Name of the script in /data/on_boot.d/
-pathvector_unifi_only: false                      # If true, skip standard installation on UniFi systems
-pathvector_unifi_run_immediately: true            # Run the UniFi script immediately after deployment
-pathvector_unifi_autostart_services: false        # Auto-start bird service in UniFi script
-pathvector_unifi_config_source: "/data/on_boot.d/pathvector.yml"  # Persistent config location on UniFi
+pathvector_deploy_unifi_script: true # Deploy the on-boot script to UniFi systems
+pathvector_unifi_script_name: "01-unifi-pathvector-setup.sh" # Name of the script in /data/on_boot.d/
+pathvector_unifi_only: false # If true, skip standard installation on UniFi systems
+pathvector_unifi_run_immediately: true # Run the UniFi script immediately after deployment
+pathvector_unifi_autostart_services: false # Auto-start bird service in UniFi script
+pathvector_unifi_config_source: "/data/on_boot.d/pathvector.yml" # Persistent config location on UniFi
 
 # UniFi HA (High Availability) configuration
-pathvector_ha_primary_ip: "169.254.254.1"         # HA primary gateway link-local IP
-pathvector_ha_shadow_ip: "169.254.254.3"          # HA shadow gateway link-local IP
-pathvector_ha_bird_port: 179                      # BGP port to check for primary readiness
-pathvector_ha_shadow_wait_timeout: 60             # Seconds to wait for primary bird before starting on shadow
+pathvector_ha_primary_ip: "169.254.254.1" # HA primary gateway link-local IP
+pathvector_ha_shadow_ip: "169.254.254.3" # HA shadow gateway link-local IP
+pathvector_ha_bird_port: 179 # BGP port to check for primary readiness
+pathvector_ha_shadow_wait_timeout: 60 # Seconds to wait for primary bird before starting on shadow

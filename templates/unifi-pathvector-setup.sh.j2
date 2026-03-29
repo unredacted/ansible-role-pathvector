@@ -10,12 +10,17 @@ set -o pipefail
 BIRD_VERSION="{{ bird_version | default('bird2') }}"
 BIRD_INSTALL_FROM_OFFICIAL="{{ bird_install_from_official | default(true) | lower }}"
 BIRD_GPG_KEY_URL="{{ bird_gpg_key_url | default('https://pkg.labs.nic.cz/gpg') }}"
+BIRD_GPG_KEY_ID="{{ bird_gpg_key_id | default('D959241751179EC7') }}"
 
 # Pathvector Configuration Variables (templated by Ansible)
 PGP_KEY_URL="{{ pathvector_pgp_key_url | default('https://repo.pathvector.io/pgp.asc') }}"
+PGP_KEY_ID="{{ pathvector_pgp_key_id | default('CF9AAE63E5517864') }}"
 REPO_URL="{{ pathvector_repo_url | default('https://repo.pathvector.io/apt/') }}"
 REPO_DIST="{{ pathvector_repo_dist | default('stable') }}"
 REPO_COMPONENT="{{ pathvector_repo_component | default('main') }}"
+
+# GPG keyserver fallback (templated by Ansible)
+GPG_KEYSERVER="{{ gpg_keyserver | default('keyserver.ubuntu.com') }}"
 
 # Script Configuration
 SCRIPT_NAME="unifi-pathvector-setup"
@@ -177,6 +182,49 @@ validate_bird_config() {
     fi
 }
 
+# Fetch a GPG key by URL with keyserver fallback.
+# Usage: fetch_gpg_key <dest_path> <url> <key_id> <label>
+# Downloads to a temp file first so a failed download never leaves a 0-byte
+# keyring in place. Falls back to keyserver.ubuntu.com if the URL is down.
+fetch_gpg_key() {
+    local dest="$1" url="$2" key_id="$3" label="$4"
+    local tmp
+    tmp=$(mktemp /tmp/gpg-key-XXXXXX)
+
+    log_message "Adding ${label} repository key from ${url}..."
+
+    # Attempt 1: direct URL download
+    if curl -fsSL "$url" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+        cp "$tmp" "$dest"
+        rm -f "$tmp"
+        log_message "${label} repository key added successfully from URL"
+        return 0
+    fi
+    log_message "WARNING: ${label} key URL download failed, trying wget..."
+
+    # Attempt 2: wget fallback (some minimal images lack curl)
+    if wget -q -O "$tmp" "$url" 2>/dev/null && [ -s "$tmp" ]; then
+        cp "$tmp" "$dest"
+        rm -f "$tmp"
+        log_message "${label} repository key added successfully from URL (wget)"
+        return 0
+    fi
+    log_message "WARNING: ${label} key URL unavailable, falling back to keyserver for ${key_id}..."
+
+    # Attempt 3: keyserver fallback
+    if gpg --keyserver "$GPG_KEYSERVER" --recv-keys "$key_id" 2>&1 | tee -a "$LOG_FILE" && \
+       gpg --export "$key_id" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+        cp "$tmp" "$dest"
+        rm -f "$tmp"
+        log_message "${label} repository key added successfully from keyserver"
+        return 0
+    fi
+
+    rm -f "$tmp"
+    log_message "ERROR: Failed to obtain ${label} repository key from URL and keyserver"
+    return 1
+}
+
 # Function to setup pathvector configuration (checksum-based copy, always regenerate)
 setup_pathvector_config() {
     log_message "Setting up pathvector configuration..."
@@ -225,16 +273,16 @@ setup_pathvector_config() {
 # Function to run cron checks
 run_cron_checks() {
     log_message "Running cron checks..."
-    
+
     # Check if services are running
     local bird_unit
     bird_unit="$(detect_bird_unit)"
-    
+
     if ! systemctl is-active --quiet "$bird_unit"; then
         log_message "Bird service ($bird_unit) is not running. Starting..."
         systemctl start "$bird_unit"
     fi
-    
+
     if ! systemctl is-enabled --quiet "$bird_unit"; then
         log_message "Bird service ($bird_unit) is not enabled. Enabling..."
         systemctl enable "$bird_unit"
@@ -254,7 +302,7 @@ case $MODE in
         run_cron_checks
         PRIMARY_STATUS="SUCCESS" # Cron checks are usually silent/safe
         ;;
-        
+
     check)
         BIRD_UNIT="$(detect_bird_unit)"
         PRIMARY_STATUS="SUCCESS"
@@ -295,7 +343,7 @@ case $MODE in
             PRIMARY_STATUS="FAILURE"
         fi
         ;;
-        
+
     install)
         log_message "Bird version: $BIRD_VERSION, Install from official: $BIRD_INSTALL_FROM_OFFICIAL"
         if [ "$FORCE_MODE" = "true" ]; then
@@ -324,13 +372,13 @@ case $MODE in
         if [ "$FORCE_MODE" = "true" ]; then
              log_message "Force mode enabled - proceeding with repository and package updates"
         fi
-        
+
         log_message "Installing $BIRD_VERSION and pathvector..."
 
         # Install prerequisite packages
         log_message "Installing prerequisite packages..."
         DEBIAN_FRONTEND=noninteractive apt update >/dev/null 2>&1
-        DEBIAN_FRONTEND=noninteractive apt install -y apt-transport-https ca-certificates wget lsb-release curl >/dev/null 2>&1
+        DEBIAN_FRONTEND=noninteractive apt install -y apt-transport-https ca-certificates wget lsb-release curl gnupg >/dev/null 2>&1
 
         # Get distribution codename
         DISTRO_CODENAME=$(lsb_release -cs 2>/dev/null || echo "bullseye")
@@ -339,12 +387,9 @@ case $MODE in
         # Setup Bird repository if using official repos
         if [ "$BIRD_INSTALL_FROM_OFFICIAL" = "true" ]; then
             # Add CZ.NIC Bird repository key (force re-add in force mode)
-            if [ "$FORCE_MODE" = "true" ] || ! [ -f /usr/share/keyrings/cznic-labs-pkg.gpg ]; then
-                log_message "Adding CZ.NIC Bird repository key from $BIRD_GPG_KEY_URL..."
-                if wget -q -O /usr/share/keyrings/cznic-labs-pkg.gpg "$BIRD_GPG_KEY_URL"; then
-                    log_message "CZ.NIC repository key added successfully"
-                else
-                    log_message "ERROR: Failed to download CZ.NIC repository key from $BIRD_GPG_KEY_URL"
+            # Use -s (non-empty) instead of -f (exists) to catch 0-byte leftover keys
+            if [ "$FORCE_MODE" = "true" ] || ! [ -s /usr/share/keyrings/cznic-labs-pkg.gpg ]; then
+                if ! fetch_gpg_key /usr/share/keyrings/cznic-labs-pkg.gpg "$BIRD_GPG_KEY_URL" "$BIRD_GPG_KEY_ID" "CZ.NIC Bird"; then
                     exit 1
                 fi
             else
@@ -363,12 +408,9 @@ case $MODE in
         fi
 
         # Add pathvector repository key (force re-add in force mode)
-        if [ "$FORCE_MODE" = "true" ] || ! [ -f /usr/share/keyrings/pathvector.asc ]; then
-            log_message "Adding pathvector repository key from $PGP_KEY_URL..."
-            if curl -fsSL "$PGP_KEY_URL" > /usr/share/keyrings/pathvector.asc; then
-                log_message "Repository key added successfully"
-            else
-                log_message "ERROR: Failed to download repository key from $PGP_KEY_URL"
+        # Use -s (non-empty) instead of -f (exists) to catch 0-byte leftover keys
+        if [ "$FORCE_MODE" = "true" ] || ! [ -s /usr/share/keyrings/pathvector.asc ]; then
+            if ! fetch_gpg_key /usr/share/keyrings/pathvector.asc "$PGP_KEY_URL" "$PGP_KEY_ID" "Pathvector"; then
                 exit 1
             fi
         else
