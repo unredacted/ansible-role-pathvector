@@ -20,7 +20,7 @@
         state: directory
         owner: root
         group: root
-        mode: '0755'
+        mode: "0755"
       register: onboot_dir_result
 
     - name: Deploy UniFi pathvector setup script from template
@@ -29,7 +29,7 @@
         dest: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
         owner: root
         group: root
-        mode: '0755'
+        mode: "0755"
         backup: yes
       register: unifi_script_deployed
 
@@ -50,7 +50,7 @@
         dest: /data/on_boot.d/pathvector.yml
         owner: root
         group: root
-        mode: '0644'
+        mode: "0644"
         backup: yes
       register: unifi_config_deployed
 
