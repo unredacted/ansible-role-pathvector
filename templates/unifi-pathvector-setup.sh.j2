@@ -186,6 +186,9 @@ validate_bird_config() {
 # Usage: fetch_gpg_key <dest_path> <url> <key_id> <label>
 # Downloads to a temp file first so a failed download never leaves a 0-byte
 # keyring in place. Falls back to keyserver.ubuntu.com if the URL is down.
+# IMPORTANT: The destination file is chmod 0644 so the _apt user can read it
+# during signature verification (mktemp creates 0600 files, and cp preserves
+# those permissions — without the chmod, apt gets NO_PUBKEY errors).
 fetch_gpg_key() {
     local dest="$1" url="$2" key_id="$3" label="$4"
     local tmp
@@ -196,6 +199,7 @@ fetch_gpg_key() {
     # Attempt 1: direct URL download
     if curl -fsSL "$url" -o "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
         cp "$tmp" "$dest"
+        chmod 0644 "$dest"
         rm -f "$tmp"
         log_message "${label} repository key added successfully from URL"
         return 0
@@ -205,16 +209,18 @@ fetch_gpg_key() {
     # Attempt 2: wget fallback (some minimal images lack curl)
     if wget -q -O "$tmp" "$url" 2>/dev/null && [ -s "$tmp" ]; then
         cp "$tmp" "$dest"
+        chmod 0644 "$dest"
         rm -f "$tmp"
         log_message "${label} repository key added successfully from URL (wget)"
         return 0
     fi
     log_message "WARNING: ${label} key URL unavailable, falling back to keyserver for ${key_id}..."
 
-    # Attempt 3: keyserver fallback
-    if gpg --keyserver "$GPG_KEYSERVER" --recv-keys "$key_id" 2>&1 | tee -a "$LOG_FILE" && \
-       gpg --export "$key_id" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
+    # Attempt 3: keyserver fallback (gpg --export outputs binary format)
+    if gpg --batch --keyserver "$GPG_KEYSERVER" --recv-keys "$key_id" 2>&1 | tee -a "$LOG_FILE" && \
+       gpg --batch --export "$key_id" > "$tmp" 2>/dev/null && [ -s "$tmp" ]; then
         cp "$tmp" "$dest"
+        chmod 0644 "$dest"
         rm -f "$tmp"
         log_message "${label} repository key added successfully from keyserver"
         return 0
