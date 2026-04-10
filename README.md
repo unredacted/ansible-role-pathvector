@@ -112,7 +112,7 @@ pathvector_skip_install: false                 # Skip package install (repos sti
 
 ### UniFi-Specific Variables
 ```yaml
-pathvector_unifi_script_name: "01-unifi-pathvector-setup.sh"  # On-boot script name
+pathvector_unifi_script_name: "20-unifi-pathvector-setup.sh"  # On-boot script name
 pathvector_unifi_run_immediately: false                       # Install immediately
 pathvector_unifi_autostart_services: false                    # Auto-start bird service
 ```

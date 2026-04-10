@@ -4,7 +4,7 @@ set -o pipefail
 # Auto-deployed by Ansible
 # Requires: unifi-on-boot (https://github.com/unredacted/unifi-on-boot)
 # Place this file in /data/on_boot.d/ (UniFi OS)
-# Make it executable: chmod +x /data/on_boot.d/01-unifi-pathvector-setup.sh
+# Make it executable: chmod +x /data/on_boot.d/20-unifi-pathvector-setup.sh
 
 # Bird Configuration Variables (templated by Ansible)
 BIRD_VERSION="{{ bird_version | default('bird2') }}"

@@ -11,7 +11,7 @@
           - "Deploying on-boot script for persistent installation"
           - "Bird version: {{ bird_version | default('bird2') }}"
           - "Install from official repos: {{ bird_install_from_official | default(true) }}"
-          - "Script name: {{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
+          - "Script name: {{ pathvector_unifi_script_name | default('20-unifi-pathvector-setup.sh') }}"
       when: pathvector_debug | bool
 
     - name: Ensure UniFi on_boot.d directory exists
@@ -26,18 +26,17 @@
     - name: Deploy UniFi pathvector setup script from template
       ansible.builtin.template:
         src: unifi-pathvector-setup.sh.j2
-        dest: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
+        dest: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('20-unifi-pathvector-setup.sh') }}"
         owner: root
         group: root
         mode: "0755"
-        backup: yes
       register: unifi_script_deployed
 
     - name: Display script deployment result
       ansible.builtin.debug:
         msg:
           - "Script deployed: {{ unifi_script_deployed.changed }}"
-          - "Script location: /data/on_boot.d/{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
+          - "Script location: /data/on_boot.d/{{ pathvector_unifi_script_name | default('20-unifi-pathvector-setup.sh') }}"
       when: pathvector_debug | bool
 
 # Deploy configuration to persistent location
@@ -65,7 +64,7 @@
 # Do NOT use systemctl restart unifi-on-boot — that re-runs ALL scripts
 # in /data/on_boot.d/ and will bounce BGP sessions.
 - name: Run pathvector setup script
-  ansible.builtin.command: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
+  ansible.builtin.command: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('20-unifi-pathvector-setup.sh') }}"
   when:
     - pathvector_unifi_run_immediately | default(true)
     - (unifi_config_deployed is defined and unifi_config_deployed.changed) or
@@ -102,7 +101,7 @@
   block:
     - name: Check if on-boot script exists
       ansible.builtin.stat:
-        path: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
+        path: "/data/on_boot.d/{{ pathvector_unifi_script_name | default('20-unifi-pathvector-setup.sh') }}"
       register: script_stat
 
     - name: Check if persistent config exists
@@ -139,7 +138,7 @@
       - "=== Manual Installation Instructions ==="
       - "To install immediately without waiting for reboot:"
       - "  ssh root@{{ inventory_hostname }}"
-      - "  /data/on_boot.d/{{ pathvector_unifi_script_name | default('01-unifi-pathvector-setup.sh') }}"
+      - "  /data/on_boot.d/{{ pathvector_unifi_script_name | default('20-unifi-pathvector-setup.sh') }}"
       - ""
       - "To check installation status:"
       - "  tail -f /var/log/unifi-pathvector-setup.log"
