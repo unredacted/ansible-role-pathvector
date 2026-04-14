@@ -443,11 +443,11 @@ case $MODE in
         # Install or update packages
         if [ "$FORCE_MODE" = "true" ]; then
             log_message "Force updating pathvector and $BIRD_VERSION to latest versions..."
-            if DEBIAN_FRONTEND=noninteractive apt install --only-upgrade -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
+            if DEBIAN_FRONTEND=noninteractive apt install --only-upgrade -y pathvector bgpq4 $BIRD_VERSION >/dev/null 2>&1; then
                 log_message "Packages updated successfully"
             else
                 log_message "No updates available or packages not installed yet, performing fresh install..."
-                if DEBIAN_FRONTEND=noninteractive apt install -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
+                if DEBIAN_FRONTEND=noninteractive apt install -y pathvector bgpq4 $BIRD_VERSION >/dev/null 2>&1; then
                     log_message "Installation completed successfully"
                 else
                     log_message "ERROR: Failed to install/update packages"
@@ -455,8 +455,8 @@ case $MODE in
                 fi
             fi
         else
-            log_message "Installing pathvector and $BIRD_VERSION..."
-            if DEBIAN_FRONTEND=noninteractive apt install -y pathvector $BIRD_VERSION >/dev/null 2>&1; then
+            log_message "Installing pathvector, bgpq4, and $BIRD_VERSION..."
+            if DEBIAN_FRONTEND=noninteractive apt install -y pathvector bgpq4 $BIRD_VERSION >/dev/null 2>&1; then
                 log_message "Installation completed successfully"
             else
                 log_message "ERROR: Failed to install packages"

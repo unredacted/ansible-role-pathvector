@@ -49,6 +49,7 @@
         name:
           - "{{ bird_version }}"
           - pathvector
+          - bgpq4
         state: present
         update_cache: yes
       register: install_result
